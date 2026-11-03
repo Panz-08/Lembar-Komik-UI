@@ -87,10 +87,17 @@ function merge(a, b) {
 // Alamat API: kosong = domain yang sama (dev server meneruskan /api ke API lokal).
 // Untuk produksi isi lewat variabel VITE_API_BASE atau di Setelan.
 const ENV_API = String(import.meta.env.VITE_API_BASE || 'https://komik-api-pengembangan.vercel.app').replace(/\/+$/, '');
-const SITE = 'komikindo';
+const SITE = 'komikindo';   // situs bawaan untuk data lama (tanpa awalan situs)
+const SITES = [['komikindo', 'Komikindo'], ['komiku', 'Komiku'], ['komiku-asia', 'Komiku Asia'], ['mgkomik', 'MGKomik'], ['shinigami', 'Shinigami']];
+const siteName = id => (SITES.find(x => x[0] === id) || [0, id])[1];
+// kunci judul = "situs~id" (data lama tanpa "~" dianggap Komikindo)
+const mk = (site, id) => site + '~' + id;
+const sp = key => { const i = String(key).indexOf('~'); return i < 0 ? { site: SITE, id: String(key) } : { site: key.slice(0, i), id: key.slice(i + 1) }; };
+const siteOf = it => it.site || sp(it.slug).site;
 const DEF = {
   api: ENV_API,
   theme: 'auto', accent: 'coral', density: 'm',
+  site: 'all',
   net: { limit: 100, imgProxy: true },
   rd: { mode: 'scroll', width: 'm', gap: 's', bg: 'black', autoHide: true, prefetch: true, bright: 100, speed: 4 }
 };
@@ -194,10 +201,10 @@ function get(path, ttl = 300000) {
 
 /* ---------- normalisasi data dari API ---------- */
 const coverOf = c => (S.net.imgProxy && c.coverProxy ? absUrl(c.coverProxy) : c.cover || absUrl(c.coverProxy));
-const normComic = c => ({ slug: c.id, title: c.title || c.id, image: coverOf(c), url: c.url || '' });
+const normComic = c => ({ slug: mk(c.site || SITE, c.id), site: c.site || SITE, title: c.title || c.id, image: coverOf(c), url: c.url || '' });
 function normDetail(d) {
   return {
-    slug: d.id, title: d.title || d.id, image: coverOf(d), summary: d.summary || '', genres: d.genres || [],
+    slug: mk(d.site || SITE, d.id), site: d.site || SITE, title: d.title || d.id, image: coverOf(d), summary: d.summary || '', genres: d.genres || [],
     status: d.status || '', url: d.url || '',
     chapters: (d.chapters || []).map(c => ({ id: c.id, title: c.title || 'Chapter', number: c.number == null ? null : c.number, date: c.date || '', url: c.url || '' }))
   };
@@ -209,12 +216,16 @@ function normPages(p) {
   return { title: p.title || '', imgs: useProxy ? prox : raw, alt: useProxy ? raw : (prox.length === raw.length ? prox : []) };
 }
 const api = {
-  search: (q, page = 1) => get(`/search?q=${enc(q)}&site=${SITE}&page=${page}`).then(d => {
+  search: (q, page = 1, site = S.site) => get(`/search?q=${enc(q)}&page=${page}${site && site !== 'all' ? '&site=' + enc(site) : ''}`).then(d => {
     const items = (d.results || []).map(normComic).filter(i => i.slug && i.title);
-    return { items, hasNext: items.length >= 10 };
+    const sites = d.sites || [];
+    const failed = sites.filter(x => !x.ok).map(x => siteName(x.site));
+    const hasNext = sites.length ? sites.some(x => x.ok && x.count >= 8) : items.length >= 10;
+    if (!items.length && sites.length && failed.length === sites.length) { const e = new ApiError(sites[0].error || 'Semua situs gagal menjawab', 502, sites[0].code || 'UPSTREAM_ERROR'); throw e; }
+    return { items, hasNext, failed };
   }),
-  comic: slug => get(`/comics/${enc(slug)}?site=${SITE}`, 600000).then(normDetail),
-  pages: id => get(`/chapters/${enc(id)}/pages?site=${SITE}`, 1800000).then(normPages),
+  comic: key => { const k = sp(key); return get(`/comics/${enc(k.id)}?site=${enc(k.site)}`, 600000).then(normDetail); },
+  pages: (id, key) => get(`/chapters/${enc(id)}/pages?site=${enc(sp(key).site)}`, 1800000).then(normPages),
   sites: () => request('/sites')
 };
 function ascChapters(chs) {
@@ -243,7 +254,7 @@ const hrefTitle = slug => `#/title/${enc(slug)}`;
 const hrefRead = (slug, ch, q) => `#/read/${enc(slug)}/${enc(ch)}${q ? '?' + q : ''}`;
 const imgTag = (src, cls = 'cimg') => src ? `<img class="${cls}" src="${esc(src)}" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer">` : '';
 function card(it, o = {}) {
-  const sub = o.sub != null ? o.sub : '';
+  const sub = o.sub != null ? o.sub : siteName(siteOf(it));
   return `<a class="card" href="${hrefTitle(it.slug)}" title="${esc(it.title)}">
     <div class="cover"><span class="ph">${esc((it.title || '?').trim().charAt(0).toUpperCase())}</span>${imgTag(it.image)}
     ${isFav(it.slug) ? `<span class="fav">${ico('heart', 18).replace('fill="none"', 'fill="currentColor"')}</span>` : ''}
@@ -304,12 +315,13 @@ function route() {
 const RAILS = [['Isekai', 'isekai'], ['Cinta', 'love'], ['Pahlawan', 'hero'], ['Sekolah', 'school']];
 const MOODS = [['Isekai', 'isekai'], ['Romantis', 'romance'], ['Aksi', 'action'], ['Fantasi', 'fantasy'], ['Komedi', 'comedy'], ['Horor', 'horror'], ['Sekolah', 'school'], ['Sihir', 'magic'], ['Naga', 'dragon'], ['Raja', 'king']];
 const KICKS = ['Lagi rame dicari', 'Wajib coba', 'Pilihan hari ini', 'Banyak yang nungguin', 'Jangan sampai ketinggalan'];
+const siteStrip = () => `<div class="gstrip" style="margin-bottom:10px"><span class="muted" style="align-self:center;margin-right:6px">Sumber:</span>${seg('site', [['all', 'Semua'], ...SITES])}</div>`;
 const moodStrip = () => `<div class="gstrip">${MOODS.map(([l, q]) => `<a class="chip" href="#/browse?q=${enc(q)}">${l}</a>`).join('')}</div>`;
 function heroHTML(items, label) {
   return `<div class="hero" id="hero">${items.map((it, i) => `<div class="slide ${i === 0 ? 'on' : ''}"><div class="hero-bg" style="${bg(it.image)}"></div>
     <div class="hero-in"><div class="hc">${imgTag(it.image, '')}</div><div style="min-width:0">
     <span class="kick">${KICKS[i % KICKS.length]}</span><h2>${esc(it.title)}</h2>
-    <div class="meta"><span>Komikindo</span><span>${esc(label)}</span></div>
+    <div class="meta"><span>${esc(siteName(it.site || SITE))}</span><span>${esc(label)}</span></div>
     <a class="btn pri" href="${hrefTitle(it.slug)}">${ico('book', 18)} Gas baca</a></div></div></div>`).join('')}
     ${items.length > 1 ? `<div class="dots">${items.map((_, i) => `<button class="${i === 0 ? 'on' : ''}" data-act="hero" data-i="${i}" aria-label="Slide ${i + 1}"></button>`).join('')}</div>` : ''}</div>`;
 }
@@ -336,7 +348,7 @@ async function viewHome() {
   const my = ++navToken;
   setApp(`<div class="page-h"><div><h1>Beranda</h1><p class="sub">${esc(greet())}</p></div></div>
     <div id="heroBox"><div class="sk" style="height:330px;border-radius:28px"></div></div>
-    ${contSection()}${favSection()}${moodStrip()}
+    ${contSection()}${favSection()}${siteStrip()}${moodStrip()}
     <div id="rails">${skelGrid(6)}</div>`);
   const res = await Promise.allSettled(RAILS.map(r => api.search(r[1], 1)));
   if (my !== navToken) return;
@@ -363,7 +375,7 @@ function viewBrowse(q) {
   const recents = L.searches.length ? `<div class="chips" style="margin-bottom:16px">${L.searches.slice(0, 8).map(s => `<a class="chip" href="#/browse?q=${enc(s)}">${ico('clock', 14)}&nbsp;${esc(s)}</a>`).join('')}</div>` : '';
   setApp(`<div class="page-h"><div><h1>Cari komik</h1><p class="sub">${B.q ? 'Hasil buat “' + esc(B.q) + '”' : 'Ketik judul yang kamu cari'}</p></div></div>
     <form id="bform" class="bform"><div class="field">${ico('search', 18)}<input id="bq" type="search" value="${esc(B.q)}" placeholder="Misalnya: solo leveling" autocomplete="off"></div><button class="btn pri" type="submit">Cari</button>${B.q ? '<a class="btn" href="#/browse">Reset</a>' : ''}</form>
-    ${recents}${moodStrip()}
+    ${recents}${siteStrip()}${moodStrip()}
     ${B.q ? `<div class="toolbar" style="margin-top:16px"><select class="sel" id="bsort" aria-label="Urutkan"><option value="def">Urutan asli</option><option value="az">Judul A–Z</option><option value="za">Judul Z–A</option></select><span class="muted" id="bcount"></span></div>
     <div id="bres">${skelGrid(12)}</div><div id="bmore" style="text-align:center;margin-top:26px"></div>`
       : '<div class="state" style="margin-top:20px"><h3>Mau nyari apa?</h3><p>Ketik judul di kolom atas, atau ketuk salah satu kata kunci di atas buat mulai jelajah.</p></div>'}`);
@@ -382,6 +394,7 @@ async function loadBrowse(first) {
     b.items.push(...add);
     b.hasNext = r.hasNext && add.length > 0;
     b.page += 1;
+    if (r.failed && r.failed.length) b.failed = r.failed;
     renderBrowse();
   } catch (e) {
     if (b !== B) return;
@@ -393,7 +406,7 @@ function renderBrowse() {
   if (B.sort === 'az') list.sort((a, b) => a.title.localeCompare(b.title, 'id'));
   if (B.sort === 'za') list.sort((a, b) => b.title.localeCompare(a.title, 'id'));
   $('#bres').innerHTML = list.length ? `<div class="grid">${list.map(i => card(i)).join('')}</div>` : '<div class="state"><h3>Hmm, kosong</h3><p>Nggak ada judul yang cocok. Coba kata kunci lain, misalnya sebagian judulnya saja.</p></div>';
-  $('#bcount').textContent = list.length + ' judul';
+  $('#bcount').textContent = list.length + ' judul' + (B.failed && B.failed.length ? ' · gagal: ' + B.failed.join(', ') : '');
   const more = $('#bmore');
   more.innerHTML = B.hasNext ? '<button class="btn" data-act="more">Muat lagi</button>' : (B.items.length ? '<span class="muted">Udah sampai ujung daftar</span>' : '');
   if (moreIO) moreIO.disconnect();
@@ -415,7 +428,7 @@ async function viewTitle(slug) {
   setApp(`<div class="dwrap"><div class="dbanner"><i style="${bg(d.image)}"></i></div>
     <div class="dh"><div class="dcover"><span style="position:absolute;inset:0;display:grid;place-items:center;font:800 56px var(--f-display);opacity:.3">${esc(d.title.charAt(0).toUpperCase())}</span>${imgTag(d.image, '')}</div>
     <div class="dinfo"><h1>${esc(d.title)}</h1>
-    <div class="pills">${d.status ? `<span class="pill">${esc(d.status)}</span>` : ''}<span class="pill">Komikindo</span><span class="pill">${d.chapters.length} chapter</span></div>
+    <div class="pills">${d.status ? `<span class="pill">${esc(d.status)}</span>` : ''}<span class="pill">${esc(siteName(d.site))}</span><span class="pill">${d.chapters.length} chapter</span></div>
     ${d.genres.length ? `<div class="chips">${d.genres.map(g => `<a class="chip" href="#/browse?q=${enc(g)}">${esc(g)}</a>`).join('')}</div>` : ''}
     <div class="acts" id="dacts"></div></div></div></div>
     ${d.summary ? `<section class="syn clamp" id="syn"><div><h2>Ceritanya tentang apa?</h2><p>${esc(d.summary)}</p>${d.summary.length > 280 ? '<button class="linkbtn" data-act="syn">Baca selengkapnya</button>' : ''}</div></section>` : ''}
@@ -505,9 +518,9 @@ function viewSettings() {
     <div class="prow"><span class="lb">Tema</span>${seg('theme', [['auto', 'Ikut sistem'], ['light', 'Terang'], ['dark', 'Gelap']])}</div>
     <div class="prow"><span class="lb">Warna aksen</span><div class="swatches">${Object.entries(ACC).map(([k, a]) => `<button class="swatch ${S.accent === k ? 'on' : ''}" data-act="accent" data-v="${k}" style="background:${a[0]}" title="${a[2]}" aria-label="${a[2]}"></button>`).join('')}</div></div>
     <div class="prow"><span class="lb">Ukuran kartu<small>Berapa banyak judul per baris</small></span>${seg('density', [['s', 'Kecil'], ['m', 'Sedang'], ['l', 'Besar']])}</div></section>
-  <section class="panel"><h2>API</h2><p>Lembar membaca komik dari API Komik Scraper milikmu (sumber: komikindo.ch).</p>
+  <section class="panel"><h2>API</h2><p>Lembar membaca komik dari API Komik Scraper milikmu (sumber: Komikindo, Komiku, Komiku Asia, MGKomik, Shinigami).</p>
     <div class="prow"><label for="baseIn" class="lb">Alamat API<small>Kosong = domain yang sama. Lokal biasanya <code>http://localhost:3000</code></small></label><div style="display:flex;gap:8px;flex:1;min-width:260px"><input class="txt" id="baseIn" value="${esc(S.api)}" placeholder="(domain yang sama)" spellcheck="false"><button class="btn" data-act="saveapi">Simpan</button></div></div>
-    <div class="prow"><span class="lb">Gambar lewat proxy API<small>Disarankan. Dipakai buat melewati anti-hotlink komikindo</small></span>${toggle('net.imgProxy')}</div>
+    <div class="prow"><span class="lb">Gambar lewat proxy API<small>Disarankan. Dipakai buat melewati anti-hotlink situs sumber</small></span>${toggle('net.imgProxy')}</div>
     <div class="prow"><span class="lb">Tes koneksi<small>Memanggil /api/sites (1 request)</small></span><button class="btn" data-act="testapi">${ico('refresh', 16)} Tes sekarang</button></div><div class="status" id="apistatus"></div></section>
   <section class="panel"><h2>Batas request</h2><p>API kamu membatasi request per menit per IP. Lembar punya antrian sendiri supaya tidak kena blokir.</p>
     <div class="prow"><span class="lb">Batas per menit<small>Bawaan API: 120 (RATE_LIMIT di .env). Disarankan sedikit di bawahnya</small></span><div style="display:flex;gap:10px;align-items:center">${range('net.limit', 10, 120, 1)}<b id="limOut" style="min-width:30px">${S.net.limit}</b></div></div>
@@ -532,11 +545,10 @@ async function testApi() {
   const t = performance.now();
   try {
     const sites = await api.sites();
-    const k = (sites || []).find(s => s.id === SITE);
     const ms = Math.round(performance.now() - t);
-    if (!k) { st.className = 'status err'; st.textContent = `✗ API nyambung (${ms} ms), tapi situs "${SITE}" nggak terdaftar di /api/sites.`; return; }
-    st.className = 'status ' + (k.status === 'ready' ? 'ok' : 'err');
-    st.textContent = `${k.status === 'ready' ? '✓' : '✗'} Nyambung ke ${base() || 'domain yang sama'} (${ms} ms) · ${k.id}: ${k.status} · ${k.host}`;
+    const ready = (sites || []).filter(x => x.status === 'ready');
+    st.className = 'status ' + (ready.length ? 'ok' : 'err');
+    st.textContent = `${ready.length ? '✓' : '✗'} Nyambung ke ${base() || 'domain yang sama'} (${ms} ms) · situs aktif: ${ready.map(x => x.id).join(', ') || 'tidak ada'}`;
   } catch (e) { st.className = 'status err'; st.textContent = '✗ ' + e.message; }
 }
 
@@ -559,7 +571,7 @@ async function viewRead(slug, chapterId, q) {
   document.body.classList.add('reading');
   const el = $('#reader');
   el.innerHTML = readerSkeleton();
-  const [pr, dr] = await Promise.allSettled([api.pages(chapterId), api.comic(slug)]);
+  const [pr, dr] = await Promise.allSettled([api.pages(chapterId, slug), api.comic(slug)]);
   if (my !== navToken) return;
   if (pr.status === 'rejected') {
     el.innerHTML = `<div class="rd" data-bg="theme"><div class="rd-top"><a class="ib" href="${hrefTitle(slug)}" aria-label="Kembali">${ico('left')}</a><div class="rd-ttl"><b>Gagal memuat chapter</b></div></div><div class="rd-view" style="display:grid;place-items:center;padding:20px"><div style="max-width:560px">${errorBlock(pr.reason)}</div></div></div>`;
@@ -692,7 +704,7 @@ function afterProgress() {
   if (R.progress > 0.88) markRead(R.slug, R.chapterId);
   if (R.progress > 0.6 && !R.prefetched && S.rd.prefetch && R.next && winUsed() < limitN() - 20) {
     R.prefetched = true;
-    api.pages(R.next).then(c => c.imgs.slice(0, 3).forEach(u => { const p = new Image(); p.referrerPolicy = 'no-referrer'; p.src = u; })).catch(() => {});
+    api.pages(R.next, R.slug).then(c => c.imgs.slice(0, 3).forEach(u => { const p = new Image(); p.referrerPolicy = 'no-referrer'; p.src = u; })).catch(() => {});
   }
   if (Date.now() - R.lastSave > 1500) saveProgress();
 }
@@ -789,6 +801,7 @@ function onKey(e) {
    ============================================================ */
 function prefChanged(p) {
   if (/^(theme|accent|density)$/.test(p)) applyTheme();
+  if (p === 'site') { mc.clear(); route(); }
   if (R.on && /^rd\./.test(p)) applyReaderPrefs(p);
 }
 document.addEventListener('click', e => {
