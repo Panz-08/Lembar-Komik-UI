@@ -278,6 +278,9 @@ function normNovelChapter(c) {
     id: c.id, slug: c.slug || '', title: c.title || 'Chapter', number: c.chapterNumber == null ? null : Number(c.chapterNumber),
     date: c.publishedAt || '', updatedAt: c.updatedAt || '', series,
     url: c.url || '', readAt: c.readAt || c.url || '', excerpt: c.excerpt || '',
+    paragraphs: Array.isArray(c.paragraphs) ? c.paragraphs : [],
+    content: c.content || '', wordCount: Number(c.wordCount) || 0,
+    readingMinutes: Number(c.readingMinutes) || 0,
     contentAvailable: Boolean(c.contentAvailable)
   };
 }
@@ -292,7 +295,7 @@ const nApi = {
   chapters: (slug, { page = 1, limit = 50, order = 'desc' } = {}) =>
     get(`/novels/${enc(slug)}/chapters?page=${page}&limit=${limit}&order=${enc(order)}`, 300000)
       .then(d => ({ novel: normNovel(d.novel || {}), items: (d.items || []).map(normNovelChapter), pagination: d.pagination || {} })),
-  chapter: id => get(`/novels/chapters/${enc(id)}`, 1800000).then(normNovelChapter),
+  chapter: id => get(`/novels/chapters/${enc(id)}?content=1`, 1800000).then(normNovelChapter),
   genres: ({ limit = 30 } = {}) => get(`/novels/genres?limit=${limit}`, 3600000).then(d => d.items || [])
 };
 
@@ -772,7 +775,7 @@ function viewSettings() {
     <div class="prow"><span class="lb">Kecepatan gulir otomatis</span>${range('rd.speed', 1, 10, 1)}</div>
     <div class="prow"><span class="lb">Sembunyikan bilah saat menggulir</span>${toggle('rd.autoHide')}</div>
     <div class="prow"><span class="lb">Muat chapter berikutnya duluan<small>Lebih mulus, tapi pakai 1 request tambahan</small></span>${toggle('rd.prefetch')}</div></section>
-  <section class="panel"><h2>Pembaca novel</h2><p>Bikin cuplikan chapter terasa enak dibaca. Teks lengkap tetap dibuka di Sakuranovel.</p>
+  <section class="panel"><h2>Pembaca novel</h2><p>Atur tipografi dan latar biar teks chapter terasa enak dibaca lama.</p>
     <div class="prow"><span class="lb">Jenis huruf</span>${seg('nrd.font', [['serif', 'Serif'], ['sans', 'Sans']])}</div>
     <div class="prow"><span class="lb">Ukuran huruf</span><div style="display:flex;gap:10px;align-items:center">${range('nrd.size', 16, 24, 1)}<b id="nvsizeOut" style="min-width:30px">${S.nrd.size}</b></div></div>
     <div class="prow"><span class="lb">Tinggi baris</span>${range('nrd.lh', 1.4, 2.2, 0.05)}</div>
@@ -1130,11 +1133,20 @@ function renderNovelReader() {
   const label = cleanChapterTitle(ch.title, seriesTitle);
   const kicker = `Sakuranovel${ch.number ? ' · Chapter ' + ch.number : ''}`;
   const readUrl = ch.readAt || ch.url;
-  const paras = ch.excerpt
-    ? ch.excerpt.split(/\n{2,}/).map(p => `<p>${esc(p)}</p>`).join('')
-    : '<p class="nv-lead">Cuplikan chapter ini belum tersedia dari sumber. Kamu tetap bisa membuka teks lengkapnya lewat tombol di bawah.</p>';
+  const full = ch.paragraphs && ch.paragraphs.length > 0;
+  const paras = full
+    ? ch.paragraphs.map(p => `<p>${esc(p)}</p>`).join('')
+    : ch.excerpt
+      ? ch.excerpt.split(/\n{2,}/).map(p => `<p>${esc(p)}</p>`).join('')
+      : '<p class="nv-lead">Teks chapter ini belum tersedia dari sumber. Kamu tetap bisa membukanya lewat tombol di bawah.</p>';
+  const metaBits = [
+    seriesTitle,
+    ch.date ? shortDate(ch.date) : '',
+    full && ch.wordCount ? Number(ch.wordCount).toLocaleString('id-ID') + ' kata' : '',
+    full && ch.readingMinutes ? ch.readingMinutes + ' menit baca' : (full ? '' : 'Cuplikan')
+  ].filter(Boolean);
   $('#reader').innerHTML = `<div class="rd nrd" id="nrd" data-paper="${S.nrd.paper}">
-    <div class="rd-line" style="width:100%"></div>
+    <div class="rd-line"></div>
     <div class="rd-top"><a class="ib" href="${hrefTitle(NR.key)}" aria-label="Kembali ke detail">${ico('left')}</a>
       <div class="rd-ttl"><b>${esc(seriesTitle)}</b><span>${esc(label)}</span></div>
       ${readUrl ? `<a class="ib" href="${esc(readUrl)}" target="_blank" rel="noopener" aria-label="Buka di sumber" title="Buka di sumber">${ico('link')}</a>` : ''}
@@ -1144,11 +1156,14 @@ function renderNovelReader() {
     <div class="rd-view" id="nrv" tabindex="0"><article class="nv">
       <div class="nv-kick">${esc(kicker)}</div>
       <h1 class="nv-h">${esc(label)}</h1>
-      <p class="nv-sub">${esc(seriesTitle)}${ch.date ? ' · ' + esc(shortDate(ch.date)) : ''} · Cuplikan</p>
+      <p class="nv-sub">${metaBits.map(esc).join(' · ')}</p>
       ${paras}
-      <aside class="nv-preview"><span class="k">Cuplikan singkat</span>
-        <p>Lembar cuma menampilkan cuplikan dari Sakuranovel. Teks lengkap chapter ini dibaca di situs sumber, biar karya penulis dan penerjemahnya tetap di tempat aslinya.</p>
-        <div class="acts">${readUrl ? `<a class="btn pri" href="${esc(readUrl)}" target="_blank" rel="noopener">${ico('book', 18)} Baca chapter lengkap</a>` : ''}<a class="btn" href="${hrefTitle(NR.key)}">Daftar chapter</a></div>
+      ${full ? '<div class="nv-end" aria-hidden="true">• • •</div>' : ''}
+      <aside class="${full ? 'nv-source' : 'nv-preview'}"><span class="k">${full ? 'Sumber teks' : 'Cuplikan singkat'}</span>
+        <p>${full
+          ? 'Teks chapter ini diambil dari Sakuranovel. Kalau mau baca di situs aslinya, buka sumbernya. Hak cipta teks tetap milik penulis dan penerjemahnya.'
+          : 'Cuplikan ini diambil dari Sakuranovel. Teks lengkapnya bisa dibaca di situs sumber, biar karya penulis dan penerjemahnya tetap di tempat aslinya.'}</p>
+        <div class="acts">${readUrl ? `<a class="btn pri" href="${esc(readUrl)}" target="_blank" rel="noopener">${ico('book', 18)} ${full ? 'Buka di Sakuranovel' : 'Baca chapter lengkap'}</a>` : ''}<a class="btn" href="${hrefTitle(NR.key)}">Daftar chapter</a></div>
       </aside>
       <nav class="nv-nav">
         ${NR.prev ? `<a href="${hrefRead(NR.key, NR.prev.id)}"><span>Chapter sebelumnya</span><b>${esc(cleanChapterTitle(NR.prev.title, seriesTitle))}</b></a>` : '<span></span>'}
@@ -1160,7 +1175,20 @@ function renderNovelReader() {
       <button class="ib" data-act="nnext" ${NR.next ? '' : 'disabled'} aria-label="Chapter berikutnya">${ico('right')}</button></div>
     <div class="sheet" id="sheet" hidden></div></div>`;
   applyNovelPrefs();
-  const v = $('#nrv'); if (v) v.focus({ preventScroll: true });
+  const v = $('#nrv');
+  if (v) {
+    let last = 0;
+    v.onscroll = () => {
+      const max = v.scrollHeight - v.clientHeight;
+      const p = max > 0 ? Math.min(1, v.scrollTop / max) : 1;
+      const ln = $('#nrd .rd-line'); if (ln) ln.style.width = (p * 100) + '%';
+      const d = v.scrollTop - last; last = v.scrollTop;
+      if (S.rd.autoHide && d > 14 && v.scrollTop > 120) $('#nrd').classList.add('hide');
+      else if (!S.rd.autoHide || d < -14 || v.scrollTop < 80) $('#nrd').classList.remove('hide');
+    };
+    v.onscroll();
+    v.focus({ preventScroll: true });
+  }
 }
 function applyNovelPrefs() {
   const rd = $('#nrd'); if (!rd) return;

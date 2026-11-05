@@ -362,6 +362,11 @@ body.reading .top, body.reading .tabbar, body.reading main#app { display: none; 
 .nv-preview .k { display: block; font: 800 10.5px var(--f-body); letter-spacing: .16em; text-transform: uppercase; color: var(--accent); margin-bottom: 6px; }
 .nv-preview p { margin: 0 0 14px; }
 .nv-preview .acts { margin: 0; }
+.nv-end { text-align: center; letter-spacing: .6em; opacity: .35; margin: 2.6em 0 0; font-family: var(--f-body); }
+.nv-source { margin: 2.6em 0 0; padding-top: 20px; border-top: 1px solid color-mix(in srgb, currentColor 18%, transparent); font-family: var(--f-body); font-size: 13.5px; line-height: 1.65; text-align: left; color: color-mix(in srgb, currentColor 70%, transparent); }
+.nv-source .k { display: block; font: 800 10.5px var(--f-body); letter-spacing: .16em; text-transform: uppercase; color: var(--accent); margin-bottom: 6px; }
+.nv-source p { margin: 0 0 14px; }
+.nv-source .acts { margin: 0; }
 .nv-nav { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 46px; font-family: var(--f-body); }
 .nv-nav a { display: block; border: 1px solid color-mix(in srgb, var(--rfg, currentColor) 22%, transparent); border-radius: 16px; padding: 13px 16px; min-width: 0; transition: border-color .15s; }
 .nv-nav a:hover { border-color: var(--accent); }

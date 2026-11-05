@@ -12,8 +12,8 @@ tidak ada login. Semua riwayat, favorit, dan setelan disimpan di browser lewat `
 
 - **Komik** — cari lintas situs, detail komik, daftar chapter, dan pembaca webtoon/manga.
 - **Novel** — rak novel populer, update chapter terbaru, pencarian, detail novel, dan daftar chapter.
-- **Pembaca novel** — tipografi serif/sans, ukuran huruf, tinggi baris, lebar kolom, latar
-  putih/sepia/abu/gelap, dan rata teks. Nyaman buat sesi baca panjang.
+- **Pembaca novel** — teks chapter lengkap dengan tipografi serif/sans, ukuran huruf, tinggi
+  baris, lebar kolom, latar putih/sepia/abu/gelap, dan rata teks. Nyaman buat sesi baca panjang.
 - **Pustaka** — lanjut baca, favorit, rak baca, dan penanda. Komik dan novel masuk ke pustaka yang sama.
 - **Tema** — terang, gelap, atau ikut sistem. Warna aksen bisa diganti.
 - **Hemat request** — cache sementara, antrian request, dan batas per menit supaya API tidak kena limit.
@@ -21,10 +21,10 @@ tidak ada login. Semua riwayat, favorit, dan setelan disimpan di browser lewat `
 
 ## Catatan soal novel
 
-API Sakuranovel hanya mengirim **metadata, daftar chapter, dan cuplikan singkat** (excerpt).
-Teks chapter lengkap tidak disalin ke API. Karena itu, pembaca novel di Lembar menampilkan
-cuplikan dengan tipografi yang nyaman, lalu menyediakan tombol **Baca chapter lengkap** ke
-Sakuranovel. Ini disengaja: karya penulis dan penerjemah tetap dibaca di sumber aslinya.
+API novel mengirim **metadata, daftar chapter, excerpt, dan teks chapter lengkap** dalam bentuk
+paragraf biasa. Pembaca novel di Lembar menampilkan teks itu dengan tipografi yang nyaman,
+lengkap dengan penanda, daftar chapter, dan tombol **Buka di Sakuranovel** kalau kamu mau
+membacanya langsung di sumber. Teks tetap milik penulis dan penerjemahnya.
 
 Sampul novel juga tidak tersedia dari API. Lembar membuat sampul generatif dari judul dan jumlah
 chapter, jadi tiap novel tetap punya identitas visual tanpa gambar palsu.
