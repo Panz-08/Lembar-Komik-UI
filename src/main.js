@@ -16,6 +16,32 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
 const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 const bg = u => (u ? `background-image:url(&quot;${esc(u)}&quot;)` : '');
 
+/* ---------- novel helpers (kunci novel pakai awalan "novel~") ---------- */
+const NK = 'novel~';
+const nk = slug => NK + String(slug || '');
+const isNovelKey = k => String(k || '').startsWith(NK);
+const rawNovel = k => String(k || '').slice(NK.length);
+const reEsc = s => String(s || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const initialOf = t => (String(t || '?').trim().charAt(0) || '?').toUpperCase();
+const hueOf = s => { let h = 0; for (const ch of String(s || '')) h = (h * 31 + ch.codePointAt(0)) % 360; return h; };
+// Sampul novel dibuat dari judulnya: tidak ada gambar sampul di API, jadi tiap judul dapat "kulit buku" sendiri.
+const novelCoverArt = (it = {}, cls = '', label = '') => {
+  const small = label || (it.chapterCount ? Number(it.chapterCount).toLocaleString('id-ID') + ' bab' : 'Sakuranovel');
+  return `<span class="nart ${cls}" style="--h:${hueOf(it.title || it.slug || 'novel')}"><em>Novel</em><b>${esc(initialOf(it.title))}</b><small>${esc(small)}</small></span>`;
+};
+const cleanChapterTitle = (title, series) => {
+  let t = String(title || '').trim();
+  if (series) t = t.replace(new RegExp('^\\s*' + reEsc(series) + '\\s*[–—:-]?\\s*', 'i'), '');
+  t = t.replace(/\s*Bahasa Indonesia\s*$/i, '').trim();
+  return t || String(title || '').trim();
+};
+const shortDate = v => {
+  if (!v) return '';
+  const d = new Date(v);
+  if (isNaN(d)) return '';
+  return d.toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' });
+};
+
 function toast(msg) {
   const t = $('#toast');
   t.textContent = msg;
@@ -99,7 +125,8 @@ const DEF = {
   theme: 'auto', accent: 'coral', density: 'm',
   site: 'all',
   net: { limit: 100, imgProxy: true },
-  rd: { mode: 'scroll', width: 'm', gap: 's', bg: 'black', autoHide: true, prefetch: true, bright: 100, speed: 4 }
+  rd: { mode: 'scroll', width: 'm', gap: 's', bg: 'black', autoHide: true, prefetch: true, bright: 100, speed: 4 },
+  nrd: { font: 'serif', size: 19, lh: 1.8, gap: 1, width: 'm', paper: 'sepia', align: 'left' }
 };
 const LDEF = { favs: {}, hist: {}, read: {}, shelf: {}, marks: [], searches: [] };
 let S = merge(clone(DEF), store.get('lembar2.settings', {}));
@@ -236,8 +263,186 @@ function ascChapters(chs) {
   return list.reverse();   // komikindo menampilkan terbaru di atas
 }
 
+/* ---------- normalisasi data novel ---------- */
+const normNovel = n => ({
+  slug: nk(n.slug), rawSlug: n.slug, title: n.title || n.slug, type: 'novel', image: '',
+  chapterCount: Number(n.chapterCount) || 0, source: n.source || 'Sakuranovel',
+  url: n.url || '', description: n.description || '',
+  firstChapter: n.firstChapter ? normNovelChapter(n.firstChapter) : null,
+  latestChapter: n.latestChapter ? normNovelChapter(n.latestChapter) : null
+});
+function normNovelChapter(c) {
+  if (!c) return null;
+  const series = c.series ? { id: c.series.id, slug: c.series.slug, title: c.series.title || c.series.name || '', url: c.series.url || '' } : null;
+  return {
+    id: c.id, slug: c.slug || '', title: c.title || 'Chapter', number: c.chapterNumber == null ? null : Number(c.chapterNumber),
+    date: c.publishedAt || '', updatedAt: c.updatedAt || '', series,
+    url: c.url || '', readAt: c.readAt || c.url || '', excerpt: c.excerpt || '',
+    contentAvailable: Boolean(c.contentAvailable)
+  };
+}
+const nApi = {
+  list: ({ page = 1, limit = 20, sort = 'popular', q = '' } = {}) =>
+    get(`/novels?page=${page}&limit=${limit}&sort=${enc(sort)}${q ? '&q=' + enc(q) : ''}`, 300000)
+      .then(d => ({ items: (d.items || []).map(normNovel), pagination: d.pagination || {} })),
+  latest: ({ page = 1, limit = 20 } = {}) =>
+    get(`/novels/latest?page=${page}&limit=${limit}`, 120000)
+      .then(d => ({ items: (d.items || []).map(normNovelChapter), pagination: d.pagination || {} })),
+  detail: slug => get(`/novels/${enc(slug)}`, 600000).then(normNovel),
+  chapters: (slug, { page = 1, limit = 50, order = 'desc' } = {}) =>
+    get(`/novels/${enc(slug)}/chapters?page=${page}&limit=${limit}&order=${enc(order)}`, 300000)
+      .then(d => ({ novel: normNovel(d.novel || {}), items: (d.items || []).map(normNovelChapter), pagination: d.pagination || {} })),
+  chapter: id => get(`/novels/chapters/${enc(id)}`, 1800000).then(normNovelChapter),
+  genres: ({ limit = 30 } = {}) => get(`/novels/genres?limit=${limit}`, 3600000).then(d => d.items || [])
+};
+
 /* ============================================================
-   Pustaka (kunci = slug komik)
+   Novel
+   ============================================================ */
+let N = null;
+const novelGrid = items => items.length ? `<div class="grid">${items.map(n => card(n)).join('')}</div>` : '';
+function novelUpdateRow(ch) {
+  const series = ch.series || {};
+  const title = cleanChapterTitle(ch.title, series.title);
+  const slug = series.slug || '';
+  const href = slug ? `#/novel/${enc(slug)}/${enc(ch.id)}` : '#/novels';
+  return `<a class="nupd" href="${href}">
+    <span class="art">${novelCoverArt({ title: series.title || title, chapterCount: 0 }, 'sm', ch.number ? 'Ch. ' + ch.number : 'Baru')}</span>
+    <span class="tx"><b>${esc(series.title || 'Novel')}</b><span>${esc(title)}</span><em>${esc(shortDate(ch.date))}</em></span>
+    <span class="go">${ico('right', 16)}</span></a>`;
+}
+function novelHeroHTML(items) {
+  const kicks = ['Novel pilihan', 'Wajib dibaca', 'Lagi naik'];
+  return `<div class="hero nhero" id="hero">${items.map((it, i) => {
+    const h = hueOf(it.title);
+    return `<div class="slide ${i === 0 ? 'on' : ''}"><div class="hero-bg" style="background:radial-gradient(120% 120% at 82% 6%, hsl(${h} 72% 52% / .72), transparent 62%), linear-gradient(158deg, hsl(${h} 55% 22%), #101218 72%)"></div>
+    <div class="hero-in"><div class="hc">${novelCoverArt(it, 'big')}</div><div style="min-width:0">
+    <span class="kick">${kicks[i % kicks.length]}</span><h2>${esc(it.title)}</h2>
+    <div class="meta"><span>Novel</span><span>${Number(it.chapterCount).toLocaleString('id-ID')} chapter</span><span>Sakuranovel</span></div>
+    <a class="btn pri" href="${hrefTitle(it.slug)}">${ico('book', 18)} Lihat novel</a></div></div></div>`;
+  }).join('')}
+  ${items.length > 1 ? `<div class="dots">${items.map((_, i) => `<button class="${i === 0 ? 'on' : ''}" data-act="hero" data-i="${i}" aria-label="Slide ${i + 1}"></button>`).join('')}</div>` : ''}</div>`;
+}
+async function viewNovels(q) {
+  const my = ++navToken;
+  const query = String(q.get('q') || '').trim();
+  const sort = q.get('sort') || 'popular';
+  const sortOpt = (v, l) => `<option value="${v}" ${sort === v ? 'selected' : ''}>${l}</option>`;
+  const tabs = `<div class="toolbar" style="margin-bottom:12px"><div class="seg"><a href="#/browse${query ? '?q=' + enc(query) : ''}">Komik</a><a class="on" href="#/novels${query ? '?q=' + enc(query) : ''}">Novel</a></div></div>`;
+  const form = `<form id="nform" class="bform"><div class="field">${ico('search', 18)}<input id="nq" type="search" value="${esc(query)}" placeholder="Cari judul novel…" autocomplete="off"></div><button class="btn pri" type="submit">Cari</button>${query ? '<a class="btn" href="#/novels">Reset</a>' : ''}</form>`;
+  if (query) {
+    setApp(`<div class="page-h"><div><h1>Novel</h1><p class="sub">Hasil buat “${esc(query)}”</p></div></div>${tabs}${form}
+      <div class="toolbar"><select class="sel" id="nsort" aria-label="Urutkan novel">${sortOpt('popular', 'Paling populer')}${sortOpt('newest', 'Terbaru')}${sortOpt('title', 'Judul A–Z')}</select><span class="muted" id="ncount"></span></div>
+      <div id="nres">${skelGrid(12)}</div>`);
+    try {
+      const r = await nApi.list({ q: query, limit: 30, sort });
+      if (my !== navToken) return;
+      $('#nres').innerHTML = r.items.length ? novelGrid(r.items) : `<div class="state"><h3>Belum ketemu</h3><p>Nggak ada novel yang cocok dengan “${esc(query)}”. Coba kata kunci lain atau cek ejaannya.</p><a class="btn pri" href="#/novels">Jelajahi rak novel</a></div>`;
+      const c = $('#ncount'); if (c) c.textContent = r.items.length + ' judul';
+    } catch (e) { if (my === navToken) $('#nres').innerHTML = errorBlock(e); }
+    return;
+  }
+  const popTitle = sort === 'newest' ? 'Novel terbaru' : sort === 'title' ? 'Semua novel' : 'Novel populer';
+  setApp(`<div class="page-h"><div><h1>Rak novel</h1><p class="sub">Cerita panjang buat dibaca pelan-pelan.</p></div>
+    <select class="sel" id="nsort" aria-label="Urutkan novel">${sortOpt('popular', 'Paling populer')}${sortOpt('newest', 'Terbaru')}${sortOpt('title', 'Judul A–Z')}</select></div>${tabs}${form}
+    <div id="nheroBox"><div class="sk" style="height:330px;border-radius:28px"></div></div>
+    <section class="sec"><div class="sec-h"><h2>Baru diupdate</h2><a class="more" href="#/novels?sort=newest">Lihat semua ${ico('right', 16)}</a></div><div id="nlatest" class="nupd-grid">${'<div class="sk" style="height:74px;border-radius:16px"></div>'.repeat(6)}</div></section>
+    <section class="sec"><div class="sec-h"><h2>${popTitle}</h2><a class="more" href="#/novels?sort=popular">Lihat semua ${ico('right', 16)}</a></div><div id="npop">${skelGrid(12)}</div></section>
+    <section class="sec" id="ngenres"></section>`);
+  const [popR, latestR, genresR] = await Promise.allSettled([
+    nApi.list({ limit: 14, sort }),
+    nApi.latest({ limit: 12 }),
+    nApi.genres({ limit: 24 })
+  ]);
+  if (my !== navToken) return;
+  if (popR.status === 'fulfilled') {
+    const heroItems = popR.value.items.filter(n => n.title).slice(0, 4);
+    $('#nheroBox').innerHTML = heroItems.length ? novelHeroHTML(heroItems) : '';
+    $('#npop').innerHTML = popR.value.items.length ? novelGrid(popR.value.items) : '<div class="state"><p style="margin:0">Belum ada novel.</p></div>';
+    startHero();
+  } else {
+    $('#nheroBox').innerHTML = '';
+    $('#npop').innerHTML = errorBlock(popR.reason);
+  }
+  $('#nlatest').innerHTML = latestR.status === 'fulfilled'
+    ? (latestR.value.items.length ? latestR.value.items.slice(0, 12).map(novelUpdateRow).join('') : '<div class="state"><p style="margin:0">Belum ada update chapter.</p></div>')
+    : errorBlock(latestR.reason);
+  const genres = genresR.status === 'fulfilled' ? genresR.value : [];
+  $('#ngenres').innerHTML = genres.length ? `<div class="sec-h"><h2>Genre populer</h2><span class="muted" style="font-size:13px">dari Sakuranovel</span></div><div class="chips">${genres.map(g => `<a class="chip" href="${esc(g.url)}" target="_blank" rel="noopener" title="Buka genre ${esc(g.name)} di Sakuranovel">${esc(g.name)} <span class="muted">${g.count}</span></a>`).join('')}</div>` : '';
+}
+async function viewNovelDetail(rawSlug) {
+  const my = ++navToken;
+  setApp('<div class="dh"><div class="dcover sk"></div><div><div class="sk" style="height:46px;width:70%"></div><div class="sk" style="height:16px;width:40%;margin-top:14px"></div><div class="sk" style="height:44px;width:60%;margin-top:26px"></div></div></div>');
+  let d;
+  try { d = await nApi.detail(rawSlug); } catch (e) { if (my === navToken) setApp(errorBlock(e)); return; }
+  if (my !== navToken) return;
+  N = { key: d.slug, d, items: [], page: 1, hasNext: true, order: 'desc', filter: '', loading: false };
+  const h = L.hist[N.key];
+  const first = d.firstChapter, latest = d.latestChapter;
+  setApp(`<div class="dwrap nvdwrap" style="--h:${hueOf(d.title)}"><div class="dbanner nvbanner"><i></i></div>
+    <div class="dh"><div class="dcover">${novelCoverArt(d, 'big')}</div>
+    <div class="dinfo"><h1>${esc(d.title)}</h1><p class="alt">Novel · ${esc(d.source)}</p>
+    <div class="pills"><span class="pill">Novel</span><span class="pill">${Number(d.chapterCount).toLocaleString('id-ID')} chapter</span><span class="pill">Sakuranovel</span></div>
+    <div class="acts" id="ndacts"></div></div></div></div>
+    <section class="syn nvabout"><div><h2>Tentang novel ini</h2>${d.description ? `<p>${esc(d.description)}</p>` : ''}
+      <div class="nfacts">
+        <div class="nfact"><span>Chapter pertama</span><b>${first ? esc(cleanChapterTitle(first.title, d.title)) : '—'}</b></div>
+        <div class="nfact"><span>Chapter terbaru</span><b>${latest ? esc(cleanChapterTitle(latest.title, d.title)) : '—'}</b></div>
+        <div class="nfact"><span>Total chapter</span><b>${Number(d.chapterCount).toLocaleString('id-ID')}</b></div>
+        <div class="nfact"><span>Sumber</span><b>Sakuranovel</b></div>
+      </div></div></section>
+    <div class="chh"><h2>Daftar chapter <span class="muted" style="font-weight:500">(${Number(d.chapterCount).toLocaleString('id-ID')})</span></h2>
+    <div class="tools"><div class="field" style="min-width:150px;flex:none"><input id="nchq" type="search" placeholder="Cari chapter…" style="padding-top:9px;padding-bottom:9px"></div>
+    <button class="btn sm" data-act="nchsort">${ico('sort', 16)} <span id="nchdir">${N.order === 'desc' ? 'Terbaru dulu' : 'Terlama dulu'}</span></button></div></div>
+    <div id="nchbox"></div>`);
+  renderNovelActions();
+  loadNovelChapters(true);
+}
+function novelItem() {
+  return { slug: N.key, title: N.d.title, image: '', type: 'novel', chapterCount: N.d.chapterCount };
+}
+function renderNovelActions() {
+  const el = $('#ndacts'); if (!el || !N) return;
+  const d = N.d, h = L.hist[N.key];
+  const first = d.firstChapter;
+  let main = '<span class="btn" disabled>Belum ada chapter</span>';
+  if (h && h.chapterId) main = `<a class="btn pri" href="${hrefRead(N.key, h.chapterId)}">${ico('play', 18)} Lanjut · ${esc(h.chapterTitle || 'Chapter')}</a>`;
+  else if (first) main = `<a class="btn pri" href="${hrefRead(N.key, first.id)}">${ico('play', 18)} Mulai dari Chapter 1</a>`;
+  const sh = L.shelf[N.key] ? L.shelf[N.key].status : '';
+  el.innerHTML = `${main}
+    <button class="btn ${isFav(N.key) ? 'on' : ''}" data-act="nfav">${ico('heart', 18)} ${isFav(N.key) ? 'Favorit' : 'Tambah favorit'}</button>
+    <select class="sel" data-act="shelf" data-novel="1" aria-label="Rak baca"><option value="">Rak: belum diatur</option><option value="reading" ${sh === 'reading' ? 'selected' : ''}>Lagi dibaca</option><option value="plan" ${sh === 'plan' ? 'selected' : ''}>Mau dibaca</option><option value="done" ${sh === 'done' ? 'selected' : ''}>Udah tamat</option></select>
+    <button class="btn" data-act="ncopy">${ico('link', 18)} Bagikan</button>
+    ${d.url ? `<a class="btn" href="${esc(d.url)}" target="_blank" rel="noopener">${ico('book', 18)} Sumber</a>` : ''}`;
+}
+async function loadNovelChapters(first) {
+  if (!N || N.loading) return;
+  N.loading = true;
+  const box = $('#nchbox');
+  if (first && box) box.innerHTML = '<div class="state"><p style="margin:0">Memuat daftar chapter…</p></div>';
+  const page = first ? 1 : N.page;
+  try {
+    const r = await nApi.chapters(N.d.rawSlug, { page, limit: 50, order: N.order });
+    if (!N) return;
+    if (first) { N.items = []; N.page = 1; }
+    N.items.push(...r.items);
+    N.page = page + 1;
+    N.hasNext = Boolean(r.pagination && r.pagination.hasNext);
+    renderNovelChapters();
+  } catch (e) {
+    if (box) box.innerHTML = errorBlock(e);
+  } finally { N.loading = false; }
+}
+function renderNovelChapters() {
+  const box = $('#nchbox'); if (!box || !N) return;
+  const readMap = L.read[N.key] || {};
+  let list = N.items.slice();
+  if (N.filter) { const f = N.filter.toLowerCase(); list = list.filter(c => cleanChapterTitle(c.title, N.d.title).toLowerCase().includes(f)); }
+  box.innerHTML = list.length ? `<div class="chlist">${list.map(c => `<a class="chrow ${readMap[c.id] ? 'read' : ''}" href="${hrefRead(N.key, c.id)}"><span class="n">${esc(cleanChapterTitle(c.title, N.d.title))}</span>${c.date ? `<span class="dt">${esc(shortDate(c.date))}</span>` : ''}<span class="ck">${ico('check', 16)}</span></a>`).join('')}</div>${N.hasNext ? '<div style="text-align:center;margin-top:16px"><button class="btn" data-act="nchmore">Muat chapter lain</button></div>' : ''}` : '<div class="state"><p style="margin:0">Nggak ada chapter yang cocok.</p></div>';
+}
+
+/* ============================================================
+   Pustaka (kunci = slug komik / novel~slug)
    ============================================================ */
 const isFav = slug => !!L.favs[slug];
 function histList() { return Object.entries(L.hist).map(([slug, h]) => ({ slug, ...h })).sort((a, b) => b.ts - a.ts); }
@@ -250,16 +455,25 @@ function markRead(slug, ch) { (L.read[slug] = L.read[slug] || {})[ch] = 1; saveL
 const app = $('#app');
 let navToken = 0, heroTimer = 0, meterTimer = 0;
 const setApp = html => { app.innerHTML = html; app.style.animation = 'none'; void app.offsetWidth; app.style.animation = ''; };
-const hrefTitle = slug => `#/title/${enc(slug)}`;
-const hrefRead = (slug, ch, q) => `#/read/${enc(slug)}/${enc(ch)}${q ? '?' + q : ''}`;
+const hrefTitle = slug => isNovelKey(slug) ? `#/novel/${enc(rawNovel(slug))}` : `#/title/${enc(slug)}`;
+const hrefRead = (slug, ch, q) => isNovelKey(slug)
+  ? `#/novel/${enc(rawNovel(slug))}/${enc(ch)}${q ? '?' + q : ''}`
+  : `#/read/${enc(slug)}/${enc(ch)}${q ? '?' + q : ''}`;
 const imgTag = (src, cls = 'cimg') => src ? `<img class="${cls}" src="${esc(src)}" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer">` : '';
 function card(it, o = {}) {
-  const sub = o.sub != null ? o.sub : siteName(siteOf(it));
+  const novel = it.type === 'novel';
+  const sub = o.sub != null ? o.sub : novel ? `${(it.chapterCount || 0).toLocaleString('id-ID')} chapter · Novel` : siteName(siteOf(it));
   return `<a class="card" href="${hrefTitle(it.slug)}" title="${esc(it.title)}">
-    <div class="cover"><span class="ph">${esc((it.title || '?').trim().charAt(0).toUpperCase())}</span>${imgTag(it.image)}
+    <div class="cover">${novel && !it.image ? novelCoverArt(it) : `<span class="ph">${esc(initialOf(it.title))}</span>${imgTag(it.image)}`}
     ${isFav(it.slug) ? `<span class="fav">${ico('heart', 18).replace('fill="none"', 'fill="currentColor"')}</span>` : ''}
-    ${o.progress != null ? `<i class="bar"><b style="width:${Math.max(3, Math.round(o.progress * 100))}%"></b></i>` : ''}</div>
+    ${o.progress != null && !novel ? `<i class="bar"><b style="width:${Math.max(3, Math.round(o.progress * 100))}%"></b></i>` : ''}</div>
     <div class="ct">${esc(it.title)}</div>${sub ? `<div class="cm">${esc(sub)}</div>` : ''}</a>`;
+}
+// Isi gambar kecil buat baris pustaka/riwayat.
+function thumbInner(item) {
+  if (!item) return '';
+  if (item.type === 'novel' && !item.image) return novelCoverArt(item, 'sm');
+  return item.image ? `<img src="${esc(item.image)}" alt="" referrerpolicy="no-referrer" loading="lazy">` : '';
 }
 const skelGrid = n => `<div class="grid">${Array.from({ length: n }, () => '<div><div class="sk" style="aspect-ratio:3/4;border-radius:18px"></div><div class="sk" style="height:12px;margin-top:10px;width:90%"></div><div class="sk" style="height:10px;margin-top:6px;width:55%"></div></div>').join('')}</div>`;
 function errorBlock(e) {
@@ -286,21 +500,25 @@ function parseHash() {
   return { seg: p.split('/').filter(Boolean).map(dec), q: new URLSearchParams(q || '') };
 }
 function updateChrome(page) {
-  const defs = [['home', 'Beranda', 'home', '#/home'], ['browse', 'Cari', 'compass', '#/browse'], ['library', 'Pustaka', 'library', '#/library/continue'], ['settings', 'Setelan', 'settings', '#/settings']];
-  const on = page === 'title' ? 'home' : page;
+  const defs = [['home', 'Beranda', 'home', '#/home'], ['browse', 'Cari', 'compass', '#/browse'], ['novels', 'Novel', 'book', '#/novels'], ['library', 'Pustaka', 'library', '#/library/continue'], ['settings', 'Setelan', 'settings', '#/settings']];
+  const on = page === 'title' ? 'home' : page === 'novel' ? 'novels' : page;
   $('#nav').innerHTML = defs.map(d => `<a href="${d[3]}" class="${on === d[0] ? 'on' : ''}">${ico(d[2], 18)}${d[1]}</a>`).join('');
   $('#tabbar').innerHTML = defs.map(d => `<a href="${d[3]}" class="${on === d[0] ? 'on' : ''}">${ico(d[2], 22)}${d[1]}</a>`).join('');
 }
 function route() {
   stopReader();
+  stopNovelReader();
   clearInterval(heroTimer); clearInterval(meterTimer);
   const { seg: s, q } = parseHash();
   const page = s[0] || 'home';
   document.body.classList.remove('reading');
   $('#reader').innerHTML = '';
   if (page === 'read' && s.length >= 3) { updateChrome('read'); return viewRead(s[1], s[2], q); }
+  if (page === 'novel' && s.length >= 3) { updateChrome('novel'); return viewNovelRead(s[1], s[2], q); }
   window.scrollTo(0, 0);
   if (page === 'title' && s.length >= 2) { updateChrome('title'); return viewTitle(s[1]); }
+  if (page === 'novel' && s.length >= 2) { updateChrome('novel'); return viewNovelDetail(s[1]); }
+  if (page === 'novels') { updateChrome('novels'); return viewNovels(q); }
   if (page === 'browse') { updateChrome('browse'); return viewBrowse(q); }
   if (page === 'library') { updateChrome('library'); return viewLibrary(s[1] || 'continue'); }
   if (page === 'settings') { updateChrome('settings'); return viewSettings(); }
@@ -337,7 +555,15 @@ function startHero() {
 function contSection() {
   const hist = histList().slice(0, 14);
   if (!hist.length) return '';
-  return `<section class="sec"><div class="sec-h"><h2>Lanjut baca yuk</h2><a class="more" href="#/library/continue">Semua ${ico('right', 16)}</a></div><div class="hscroll">${hist.map(h => `<a class="card" href="${hrefRead(h.slug, h.chapterId, 'p=' + (h.progress || 0).toFixed(3) + '&pg=' + (h.page || 0))}" title="${esc(h.item.title)}"><div class="cover"><span class="ph">${esc(h.item.title.charAt(0).toUpperCase())}</span>${imgTag(h.item.image)}<i class="bar"><b style="width:${Math.max(4, Math.round((h.progress || 0) * 100))}%"></b></i></div><div class="ct">${esc(h.item.title)}</div><div class="cm">${esc(h.chapterTitle || '')}</div></a>`).join('')}</div></section>`;
+  return `<section class="sec"><div class="sec-h"><h2>Lanjut baca yuk</h2><a class="more" href="#/library/continue">Semua ${ico('right', 16)}</a></div><div class="hscroll">${hist.map(h => {
+    const novel = h.item.type === 'novel';
+    const q = novel ? '' : 'p=' + (h.progress || 0).toFixed(3) + '&pg=' + (h.page || 0);
+    return `<a class="card" href="${hrefRead(h.slug, h.chapterId, q)}" title="${esc(h.item.title)}"><div class="cover">${novel ? novelCoverArt(h.item) : `<span class="ph">${esc(initialOf(h.item.title))}</span>${imgTag(h.item.image)}`}${novel ? '' : `<i class="bar"><b style="width:${Math.max(4, Math.round((h.progress || 0) * 100))}%"></b></i>`}</div><div class="ct">${esc(h.item.title)}</div><div class="cm">${esc(h.chapterTitle || '')}</div></a>`;
+  }).join('')}</div></section>`;
+}
+function novelRail(items) {
+  if (!items || !items.length) return '';
+  return `<section class="sec"><div class="sec-h"><h2>Dari rak novel</h2><a class="more" href="#/novels">Jelajahi novel ${ico('right', 16)}</a></div><div class="hscroll stagger">${items.slice(0, 14).map(n => card(n)).join('')}</div></section>`;
 }
 function favSection() {
   const fs = Object.values(L.favs).sort((a, b) => b.ts - a.ts).slice(0, 14);
@@ -350,18 +576,22 @@ async function viewHome() {
     <div id="heroBox"><div class="sk" style="height:330px;border-radius:28px"></div></div>
     ${contSection()}${favSection()}${siteStrip()}${moodStrip()}
     <div id="rails">${skelGrid(6)}</div>`);
-  const res = await Promise.allSettled(RAILS.map(r => api.search(r[1], 1)));
+  const [res, nov] = await Promise.all([
+    Promise.allSettled(RAILS.map(r => api.search(r[1], 1))),
+    nApi.list({ limit: 14, sort: 'popular' }).catch(() => null)
+  ]);
   if (my !== navToken) return;
   const ok = res.map((r, i) => (r.status === 'fulfilled' && r.value.items.length ? { label: RAILS[i][0], q: RAILS[i][1], items: r.value.items } : null)).filter(Boolean);
+  const novelHtml = nov && nov.items.length ? novelRail(nov.items) : '';
   if (!ok.length) {
     $('#heroBox').innerHTML = '';
     const bad = res.find(r => r.status === 'rejected');
-    $('#rails').innerHTML = errorBlock(bad ? bad.reason : new Error('API menjawab tapi hasilnya kosong. Coba cari judul lewat kolom pencarian.'));
+    $('#rails').innerHTML = novelHtml || errorBlock(bad ? bad.reason : new Error('API menjawab tapi hasilnya kosong. Coba cari judul lewat kolom pencarian.'));
     return;
   }
   const pool = ok[0].items.filter(i => i.image).slice(0, 5);
   $('#heroBox').innerHTML = pool.length ? heroHTML(pool, ok[0].label) : '';
-  $('#rails').innerHTML = ok.map(r => `<section class="sec"><div class="sec-h"><h2>${esc(r.label)}</h2><a class="more" href="#/browse?q=${enc(r.q)}">Lihat semua ${ico('right', 16)}</a></div><div class="hscroll stagger">${r.items.slice(0, 14).map(i => card(i)).join('')}</div></section>`).join('');
+  $('#rails').innerHTML = ok.map(r => `<section class="sec"><div class="sec-h"><h2>${esc(r.label)}</h2><a class="more" href="#/browse?q=${enc(r.q)}">Lihat semua ${ico('right', 16)}</a></div><div class="hscroll stagger">${r.items.slice(0, 14).map(i => card(i)).join('')}</div></section>`).join('') + novelHtml;
   startHero();
 }
 
@@ -374,6 +604,7 @@ function viewBrowse(q) {
   B = { q: (q.get('q') || '').trim(), page: 1, items: [], hasNext: false, loading: false, sort: 'def' };
   const recents = L.searches.length ? `<div class="chips" style="margin-bottom:16px">${L.searches.slice(0, 8).map(s => `<a class="chip" href="#/browse?q=${enc(s)}">${ico('clock', 14)}&nbsp;${esc(s)}</a>`).join('')}</div>` : '';
   setApp(`<div class="page-h"><div><h1>Cari komik</h1><p class="sub">${B.q ? 'Hasil buat “' + esc(B.q) + '”' : 'Ketik judul yang kamu cari'}</p></div></div>
+    <div class="toolbar" style="margin-bottom:12px"><div class="seg"><a class="on" href="#/browse${B.q ? '?q=' + enc(B.q) : ''}">Komik</a><a href="#/novels${B.q ? '?q=' + enc(B.q) : ''}">Novel</a></div></div>
     <form id="bform" class="bform"><div class="field">${ico('search', 18)}<input id="bq" type="search" value="${esc(B.q)}" placeholder="Misalnya: solo leveling" autocomplete="off"></div><button class="btn pri" type="submit">Cari</button>${B.q ? '<a class="btn" href="#/browse">Reset</a>' : ''}</form>
     ${recents}${siteStrip()}${moodStrip()}
     ${B.q ? `<div class="toolbar" style="margin-top:16px"><select class="sel" id="bsort" aria-label="Urutkan"><option value="def">Urutan asli</option><option value="az">Judul A–Z</option><option value="za">Judul Z–A</option></select><span class="muted" id="bcount"></span></div>
@@ -478,10 +709,13 @@ function viewLibrary(tab) {
   let body = '';
   if (tab === 'continue') {
     const hs = histList();
-    body = hs.length ? `<div class="rows">${hs.map(h => `<div class="lrow"><a class="th" href="${hrefTitle(h.slug)}"><img src="${esc(h.item.image)}" alt="" referrerpolicy="no-referrer" loading="lazy"></a>
-      <div class="tx"><b>${esc(h.item.title)}</b><span>${esc(h.chapterTitle || '')} · ${Math.round((h.progress || 0) * 100)}% · ${ago(h.ts)}</span></div>
-      <a class="btn pri sm" href="${hrefRead(h.slug, h.chapterId, 'p=' + (h.progress || 0).toFixed(3) + '&pg=' + (h.page || 0))}">Lanjut</a>
-      <button class="iconbtn" data-act="rm-hist" data-key="${esc(h.slug)}" title="Hapus dari riwayat">${ico('x', 16)}</button></div>`).join('')}</div>` : emptyMsg('Belum ada yang dibaca');
+    body = hs.length ? `<div class="rows">${hs.map(h => {
+      const novel = h.item.type === 'novel';
+      return `<div class="lrow"><a class="th" href="${hrefTitle(h.slug)}">${thumbInner(h.item)}</a>
+      <div class="tx"><b>${esc(h.item.title)}</b><span>${esc(h.chapterTitle || '')}${novel ? '' : ' · ' + Math.round((h.progress || 0) * 100) + '%'} · ${ago(h.ts)}</span></div>
+      <a class="btn pri sm" href="${hrefRead(h.slug, h.chapterId, novel ? '' : 'p=' + (h.progress || 0).toFixed(3) + '&pg=' + (h.page || 0))}">Lanjut</a>
+      <button class="iconbtn" data-act="rm-hist" data-key="${esc(h.slug)}" title="Hapus dari riwayat">${ico('x', 16)}</button></div>`;
+    }).join('')}</div>` : emptyMsg('Belum ada yang dibaca');
   } else if (tab === 'fav') {
     const fs = Object.values(L.favs).sort((a, b) => b.ts - a.ts);
     body = fs.length ? `<div class="grid">${fs.map(f => `<div class="lcard">${card(f.item)}<button class="x" data-act="rm-fav" data-key="${esc(f.item.slug)}" title="Hapus favorit">${ico('x', 14)}</button></div>`).join('')}</div>` : emptyMsg('Belum ada favorit');
@@ -491,10 +725,13 @@ function viewLibrary(tab) {
     body = all.length ? Object.keys(names).map(st => { const g = all.filter(x => x.status === st); return g.length ? `<section class="sec" style="margin-top:0;margin-bottom:26px"><div class="sec-h"><h2>${names[st]} <span class="muted" style="font-weight:500">(${g.length})</span></h2></div><div class="grid">${g.map(x => card(x.item)).join('')}</div></section>` : ''; }).join('') : emptyMsg('Rak masih kosong');
   } else {
     const ms = L.marks.slice().sort((a, b) => b.ts - a.ts);
-    body = ms.length ? `<div class="rows">${ms.map(m => `<div class="lrow"><a class="th" href="${hrefTitle(m.slug)}"><img src="${esc(m.image || '')}" alt="" referrerpolicy="no-referrer" loading="lazy"></a>
-      <div class="tx"><b>${esc(m.title)}</b><span>${esc(m.chapterTitle || '')} · hal. ${(m.page || 0) + 1} · ${ago(m.ts)}</span></div>
-      <a class="btn pri sm" href="${hrefRead(m.slug, m.chapterId, 'p=' + (m.progress || 0).toFixed(3) + '&pg=' + (m.page || 0))}">Buka</a>
-      <button class="iconbtn" data-act="rm-mark" data-id="${esc(m.id)}" title="Hapus penanda">${ico('x', 16)}</button></div>`).join('')}</div>` : emptyMsg('Belum ada penanda');
+    body = ms.length ? `<div class="rows">${ms.map(m => {
+      const novel = m.type === 'novel' || isNovelKey(m.slug);
+      return `<div class="lrow"><a class="th" href="${hrefTitle(m.slug)}">${thumbInner({ type: novel ? 'novel' : 'comic', title: m.title, image: m.image })}</a>
+      <div class="tx"><b>${esc(m.title)}</b><span>${esc(m.chapterTitle || '')}${novel ? '' : ' · hal. ' + ((m.page || 0) + 1)} · ${ago(m.ts)}</span></div>
+      <a class="btn pri sm" href="${hrefRead(m.slug, m.chapterId, novel ? '' : 'p=' + (m.progress || 0).toFixed(3) + '&pg=' + (m.page || 0))}">Buka</a>
+      <button class="iconbtn" data-act="rm-mark" data-id="${esc(m.id)}" title="Hapus penanda">${ico('x', 16)}</button></div>`;
+    }).join('')}</div>` : emptyMsg('Belum ada penanda');
   }
   setApp(`<div class="page-h"><div><h1>Pustaka</h1><p class="sub">Koleksi pribadimu, disimpan di browser ini.</p></div></div>
     <div class="stats"><div class="stat"><b>${Object.keys(L.favs).length}</b><span>Favorit</span></div><div class="stat"><b>${Object.keys(L.hist).length}</b><span>Judul dibaca</span></div><div class="stat"><b>${readCount()}</b><span>Chapter kelar</span></div><div class="stat"><b>${L.marks.length}</b><span>Penanda</span></div></div>
@@ -518,10 +755,10 @@ function viewSettings() {
     <div class="prow"><span class="lb">Tema</span>${seg('theme', [['auto', 'Ikut sistem'], ['light', 'Terang'], ['dark', 'Gelap']])}</div>
     <div class="prow"><span class="lb">Warna aksen</span><div class="swatches">${Object.entries(ACC).map(([k, a]) => `<button class="swatch ${S.accent === k ? 'on' : ''}" data-act="accent" data-v="${k}" style="background:${a[0]}" title="${a[2]}" aria-label="${a[2]}"></button>`).join('')}</div></div>
     <div class="prow"><span class="lb">Ukuran kartu<small>Berapa banyak judul per baris</small></span>${seg('density', [['s', 'Kecil'], ['m', 'Sedang'], ['l', 'Besar']])}</div></section>
-  <section class="panel"><h2>API</h2><p>Lembar membaca komik dari API Komik Scraper milikmu (sumber: Komikindo, Komiku, Komiku Asia, MGKomik, Shinigami).</p>
+  <section class="panel"><h2>API</h2><p>Lembar membaca komik dan novel dari API Komik &amp; Novel milikmu (komik: Komikindo, Komiku, Komiku Asia, MGKomik, Shinigami; novel: Sakuranovel).</p>
     <div class="prow"><label for="baseIn" class="lb">Alamat API<small>Kosong = domain yang sama. Lokal biasanya <code>http://localhost:3000</code></small></label><div style="display:flex;gap:8px;flex:1;min-width:260px"><input class="txt" id="baseIn" value="${esc(S.api)}" placeholder="(domain yang sama)" spellcheck="false"><button class="btn" data-act="saveapi">Simpan</button></div></div>
     <div class="prow"><span class="lb">Gambar lewat proxy API<small>Disarankan. Dipakai buat melewati anti-hotlink situs sumber</small></span>${toggle('net.imgProxy')}</div>
-    <div class="prow"><span class="lb">Tes koneksi<small>Memanggil /api/sites (1 request)</small></span><button class="btn" data-act="testapi">${ico('refresh', 16)} Tes sekarang</button></div><div class="status" id="apistatus"></div></section>
+    <div class="prow"><span class="lb">Tes koneksi<small>Memanggil /api/sites dan /api/novels</small></span><button class="btn" data-act="testapi">${ico('refresh', 16)} Tes sekarang</button></div><div class="status" id="apistatus"></div></section>
   <section class="panel"><h2>Batas request</h2><p>API kamu membatasi request per menit per IP. Lembar punya antrian sendiri supaya tidak kena blokir.</p>
     <div class="prow"><span class="lb">Batas per menit<small>Bawaan API: 120 (RATE_LIMIT di .env). Disarankan sedikit di bawahnya</small></span><div style="display:flex;gap:10px;align-items:center">${range('net.limit', 10, 120, 1)}<b id="limOut" style="min-width:30px">${S.net.limit}</b></div></div>
     <div class="prow" style="display:block"><span class="lb">Pemakaian sekarang</span><div class="meter" id="meter"><b></b></div><div class="status" id="meterTxt"></div></div>
@@ -535,6 +772,14 @@ function viewSettings() {
     <div class="prow"><span class="lb">Kecepatan gulir otomatis</span>${range('rd.speed', 1, 10, 1)}</div>
     <div class="prow"><span class="lb">Sembunyikan bilah saat menggulir</span>${toggle('rd.autoHide')}</div>
     <div class="prow"><span class="lb">Muat chapter berikutnya duluan<small>Lebih mulus, tapi pakai 1 request tambahan</small></span>${toggle('rd.prefetch')}</div></section>
+  <section class="panel"><h2>Pembaca novel</h2><p>Bikin cuplikan chapter terasa enak dibaca. Teks lengkap tetap dibuka di Sakuranovel.</p>
+    <div class="prow"><span class="lb">Jenis huruf</span>${seg('nrd.font', [['serif', 'Serif'], ['sans', 'Sans']])}</div>
+    <div class="prow"><span class="lb">Ukuran huruf</span><div style="display:flex;gap:10px;align-items:center">${range('nrd.size', 16, 24, 1)}<b id="nvsizeOut" style="min-width:30px">${S.nrd.size}</b></div></div>
+    <div class="prow"><span class="lb">Tinggi baris</span>${range('nrd.lh', 1.4, 2.2, 0.05)}</div>
+    <div class="prow"><span class="lb">Jarak antar paragraf</span>${range('nrd.gap', 0.6, 1.6, 0.1)}</div>
+    <div class="prow"><span class="lb">Lebar kolom</span>${seg('nrd.width', [['s', 'Sempit'], ['m', 'Sedang'], ['l', 'Lebar'], ['f', 'Penuh']])}</div>
+    <div class="prow"><span class="lb">Latar baca</span>${seg('nrd.paper', [['white', 'Putih'], ['sepia', 'Sepia'], ['gray', 'Abu'], ['black', 'Gelap']])}</div>
+    <div class="prow"><span class="lb">Rata teks</span>${seg('nrd.align', [['left', 'Kiri'], ['justify', 'Rata kanan-kiri']])}</div></section>
   <section class="panel"><h2>Data</h2><p>Cadangkan atau pindahkan pustaka dan setelan ke perangkat lain.</p>
     <div class="acts" style="margin:0"><button class="btn" data-act="export">Ekspor cadangan</button><label class="btn" style="cursor:pointer">Impor cadangan<input type="file" id="impfile" accept="application/json" hidden></label><button class="btn" data-act="clear-hist">Hapus riwayat</button><button class="btn" data-act="clear-all">Hapus semua data</button></div></section>
   <section class="panel"><h2>Pintasan keyboard</h2><p>Berlaku pas lagi baca.</p><div class="kbd"><span><kbd>N</kbd> / <kbd>P</kbd> chapter berikutnya / sebelumnya</span><span><kbd>←</kbd> <kbd>→</kbd> pindah halaman</span><span><kbd>J</kbd> / <kbd>K</kbd> gulir turun / naik</span><span><kbd>A</kbd> gulir otomatis</span><span><kbd>B</kbd> penanda</span><span><kbd>C</kbd> daftar chapter</span><span><kbd>S</kbd> setelan baca</span><span><kbd>F</kbd> layar penuh</span><span><kbd>Esc</kbd> kembali</span><span><kbd>/</kbd> fokus ke pencarian</span></div></section></div>`);
@@ -543,13 +788,16 @@ function viewSettings() {
 async function testApi() {
   const st = $('#apistatus'); st.className = 'status'; st.textContent = 'Lagi ngetes…';
   const t = performance.now();
-  try {
-    const sites = await api.sites();
-    const ms = Math.round(performance.now() - t);
-    const ready = (sites || []).filter(x => x.status === 'ready');
-    st.className = 'status ' + (ready.length ? 'ok' : 'err');
-    st.textContent = `${ready.length ? '✓' : '✗'} Nyambung ke ${base() || 'domain yang sama'} (${ms} ms) · situs aktif: ${ready.map(x => x.id).join(', ') || 'tidak ada'}`;
-  } catch (e) { st.className = 'status err'; st.textContent = '✗ ' + e.message; }
+  const [sites, novels] = await Promise.allSettled([api.sites(), nApi.list({ limit: 1, sort: 'popular' })]);
+  const ms = Math.round(performance.now() - t);
+  const ready = sites.status === 'fulfilled' ? (sites.value || []).filter(x => x.status === 'ready') : [];
+  const novelTotal = novels.status === 'fulfilled' ? (novels.value.pagination && novels.value.pagination.total) : null;
+  const ok = ready.length || novels.status === 'fulfilled';
+  const bits = [];
+  if (sites.status === 'fulfilled') bits.push(`komik: ${ready.map(x => x.id).join(', ') || 'tidak ada'}`);
+  if (novels.status === 'fulfilled') bits.push(`novel: ${novelTotal == null ? 'siap' : novelTotal + ' judul'}`);
+  st.className = 'status ' + (ok ? 'ok' : 'err');
+  st.textContent = (ok ? '✓' : '✗') + ` Nyambung ke ${base() || 'domain yang sama'} (${ms} ms) · ` + (bits.join(' · ') || (sites.reason && sites.reason.message) || 'gagal');
 }
 
 /* ============================================================
@@ -777,7 +1025,7 @@ function openSheet(type) {
     sh.hidden = false;
   }
 }
-function closeSheet() { const sh = $('#sheet'); if (sh) sh.hidden = true; sheetOpen = false; const v = $('#rdv'); if (v) v.focus({ preventScroll: true }); }
+function closeSheet() { const sh = $('#sheet'); if (sh) sh.hidden = true; sheetOpen = false; const v = $('#rdv') || $('#nrv'); if (v) v.focus({ preventScroll: true }); }
 function onKey(e) {
   if (!R.on || e.target.matches('input,textarea,select') || e.ctrlKey || e.metaKey || e.altKey) return;
   const k = e.key, v = $('#rdv');
@@ -797,12 +1045,204 @@ function onKey(e) {
 }
 
 /* ============================================================
+   Pembaca novel
+   ============================================================ */
+let NR = { on: false };
+const NV_W = { s: '560px', m: '680px', l: '820px', f: '100%' };
+function stopNovelReader() {
+  if (NR.on) { saveNovelProgress(); saveLNow(); }
+  NR.on = false;
+  document.removeEventListener('keydown', onNovelKey);
+  sheetOpen = false;
+}
+async function findNovelNeighbors(slug, ch) {
+  if (!slug) return { prev: null, next: null, list: [] };
+  // Chapter bisa berada di ujung halaman, jadi tetangganya kadang ada di halaman sebelah.
+  // Halaman lain baru diambil kalau memang diperlukan, supaya request tetap hemat.
+  const map = new Map();
+  const add = items => items.forEach(x => map.set(String(x.id), x));
+  const fetchPage = async (page, order = 'asc') => {
+    try { add((await nApi.chapters(slug, { page, limit: 100, order })).items); return true; }
+    catch (e) { return false; }
+  };
+  const sorted = () => Array.from(map.values()).sort((a, b) => {
+    const da = a.date ? new Date(a.date).getTime() : 0;
+    const db = b.date ? new Date(b.date).getTime() : 0;
+    return da === db ? Number(a.id) - Number(b.id) : da - db;
+  });
+  const pageOf = ch.number ? Math.max(1, Math.ceil(ch.number / 100)) : 1;
+  await fetchPage(pageOf);
+  let list = sorted();
+  let i = list.findIndex(x => String(x.id) === String(ch.id));
+  if (i < 0) {
+    await fetchPage(1, 'asc');
+    await fetchPage(1, 'desc');
+    list = sorted();
+    i = list.findIndex(x => String(x.id) === String(ch.id));
+  }
+  if (i < 0) return { prev: null, next: null, list: [] };
+  if (i === 0) {
+    await fetchPage(pageOf - 1);
+    list = sorted();
+    i = list.findIndex(x => String(x.id) === String(ch.id));
+  }
+  if (i === list.length - 1) {
+    await fetchPage(pageOf + 1);
+    list = sorted();
+    i = list.findIndex(x => String(x.id) === String(ch.id));
+  }
+  return { prev: list[i - 1] || null, next: list[i + 1] || null, list };
+}
+async function viewNovelRead(rawSlug, chapterId, q) {
+  const my = ++navToken;
+  document.body.classList.add('reading');
+  const el = $('#reader');
+  el.innerHTML = `<div class="rd nrd" data-paper="sepia"><div class="rd-top"><a class="ib" href="#/novels" aria-label="Kembali">${ico('left')}</a><div class="rd-ttl"><b>Memuat chapter…</b></div></div><div class="rd-view" style="display:grid;place-items:center"><div class="sk" style="width:min(560px,88%);height:60vh"></div></div></div>`;
+  const [cr, dr] = await Promise.allSettled([nApi.chapter(chapterId), nApi.detail(rawSlug)]);
+  if (my !== navToken) return;
+  if (cr.status === 'rejected') {
+    el.innerHTML = `<div class="rd nrd" data-paper="sepia"><div class="rd-top"><a class="ib" href="#/novels" aria-label="Kembali">${ico('left')}</a><div class="rd-ttl"><b>Gagal memuat chapter</b></div></div><div class="rd-view" style="display:grid;place-items:center;padding:20px"><div style="max-width:560px">${errorBlock(cr.reason)}</div></div></div>`;
+    return;
+  }
+  const ch = cr.value;
+  const got = dr.status === 'fulfilled' ? dr.value : null;
+  const slug = (ch.series && ch.series.slug) || rawSlug;
+  // Detail cuma dipakai kalau memang novel yang sama; jangan sampai jumlah chapter
+  // dari novel lain kepakai gara-gara slug di URL keliru.
+  const det = got && (!ch.series || !ch.series.slug || got.rawSlug === ch.series.slug) ? got : null;
+  const nb = await findNovelNeighbors(slug, ch);
+  if (my !== navToken) return;
+  NR = {
+    on: true, slug, key: nk(slug), ch, det,
+    prev: nb.prev, next: nb.next, list: nb.list,
+    chTitle: cleanChapterTitle(ch.title, (ch.series && ch.series.title) || (det && det.title) || slug)
+  };
+  renderNovelReader();
+  markRead(NR.key, ch.id);
+  saveNovelProgress();
+  document.addEventListener('keydown', onNovelKey);
+}
+const novelSeriesTitle = () => (NR.ch.series && NR.ch.series.title) || (NR.det && NR.det.title) || NR.slug;
+const isNovelBm = () => NR.on && L.marks.some(m => m.id === NR.key + '|' + NR.ch.id);
+function renderNovelReader() {
+  const ch = NR.ch, det = NR.det;
+  const seriesTitle = novelSeriesTitle();
+  const label = cleanChapterTitle(ch.title, seriesTitle);
+  const kicker = `Sakuranovel${ch.number ? ' · Chapter ' + ch.number : ''}`;
+  const readUrl = ch.readAt || ch.url;
+  const paras = ch.excerpt
+    ? ch.excerpt.split(/\n{2,}/).map(p => `<p>${esc(p)}</p>`).join('')
+    : '<p class="nv-lead">Cuplikan chapter ini belum tersedia dari sumber. Kamu tetap bisa membuka teks lengkapnya lewat tombol di bawah.</p>';
+  $('#reader').innerHTML = `<div class="rd nrd" id="nrd" data-paper="${S.nrd.paper}">
+    <div class="rd-line" style="width:100%"></div>
+    <div class="rd-top"><a class="ib" href="${hrefTitle(NR.key)}" aria-label="Kembali ke detail">${ico('left')}</a>
+      <div class="rd-ttl"><b>${esc(seriesTitle)}</b><span>${esc(label)}</span></div>
+      ${readUrl ? `<a class="ib" href="${esc(readUrl)}" target="_blank" rel="noopener" aria-label="Buka di sumber" title="Buka di sumber">${ico('link')}</a>` : ''}
+      <button class="ib ${isNovelBm() ? 'on' : ''}" id="nbmBtn" data-act="nbm" aria-label="Penanda">${ico('bookmark')}</button>
+      <button class="ib" data-act="ntoc" aria-label="Daftar chapter">${ico('list')}</button>
+      <button class="ib" data-act="nsettings" aria-label="Setelan baca">${ico('sliders')}</button></div>
+    <div class="rd-view" id="nrv" tabindex="0"><article class="nv">
+      <div class="nv-kick">${esc(kicker)}</div>
+      <h1 class="nv-h">${esc(label)}</h1>
+      <p class="nv-sub">${esc(seriesTitle)}${ch.date ? ' · ' + esc(shortDate(ch.date)) : ''} · Cuplikan</p>
+      ${paras}
+      <aside class="nv-preview"><span class="k">Cuplikan singkat</span>
+        <p>Lembar cuma menampilkan cuplikan dari Sakuranovel. Teks lengkap chapter ini dibaca di situs sumber, biar karya penulis dan penerjemahnya tetap di tempat aslinya.</p>
+        <div class="acts">${readUrl ? `<a class="btn pri" href="${esc(readUrl)}" target="_blank" rel="noopener">${ico('book', 18)} Baca chapter lengkap</a>` : ''}<a class="btn" href="${hrefTitle(NR.key)}">Daftar chapter</a></div>
+      </aside>
+      <nav class="nv-nav">
+        ${NR.prev ? `<a href="${hrefRead(NR.key, NR.prev.id)}"><span>Chapter sebelumnya</span><b>${esc(cleanChapterTitle(NR.prev.title, seriesTitle))}</b></a>` : '<span></span>'}
+        ${NR.next ? `<a class="next" href="${hrefRead(NR.key, NR.next.id)}"><span>Chapter berikutnya</span><b>${esc(cleanChapterTitle(NR.next.title, seriesTitle))}</b></a>` : '<span></span>'}
+      </nav>
+    </article></div>
+    <div class="rd-bot"><button class="ib" data-act="nprev" ${NR.prev ? '' : 'disabled'} aria-label="Chapter sebelumnya">${ico('left')}</button>
+      <div class="rd-prog"><span class="nrd-cnum">${esc(ch.number ? 'Chapter ' + ch.number : label)}</span><span class="muted">${det && det.chapterCount ? 'dari ' + Number(det.chapterCount).toLocaleString('id-ID') + ' chapter' : ''}</span></div>
+      <button class="ib" data-act="nnext" ${NR.next ? '' : 'disabled'} aria-label="Chapter berikutnya">${ico('right')}</button></div>
+    <div class="sheet" id="sheet" hidden></div></div>`;
+  applyNovelPrefs();
+  const v = $('#nrv'); if (v) v.focus({ preventScroll: true });
+}
+function applyNovelPrefs() {
+  const rd = $('#nrd'); if (!rd) return;
+  rd.dataset.paper = S.nrd.paper;
+  const nv = $('.nv', rd); if (!nv) return;
+  nv.style.setProperty('--nvsize', (+S.nrd.size || 19) + 'px');
+  nv.style.setProperty('--nvlh', +S.nrd.lh || 1.8);
+  nv.style.setProperty('--nvgap', (+S.nrd.gap || 1) + 'em');
+  nv.style.setProperty('--nvalign', S.nrd.align || 'left');
+  nv.style.setProperty('--nvfont', S.nrd.font === 'sans' ? 'var(--f-body)' : 'var(--f-serif)');
+  nv.style.setProperty('--nvw', NV_W[S.nrd.width] || '680px');
+}
+function saveNovelProgress() {
+  if (!NR.on) return;
+  const seriesTitle = novelSeriesTitle();
+  L.hist[NR.key] = {
+    item: { slug: NR.key, title: seriesTitle, image: '', type: 'novel', chapterCount: (NR.det && NR.det.chapterCount) || 0 },
+    chapterId: NR.ch.id, chapterTitle: NR.chTitle || cleanChapterTitle(NR.ch.title, seriesTitle),
+    ts: Date.now(), progress: 1, page: 0
+  };
+  saveL();
+}
+function goNovelChapter(id) { if (!id) return; markRead(NR.key, NR.ch.id); location.replace(hrefRead(NR.key, id)); }
+function leaveNovel() { if (NR.on) location.hash = hrefTitle(NR.key).slice(1); }
+function toggleNovelBookmark() {
+  const id = NR.key + '|' + NR.ch.id;
+  const i = L.marks.findIndex(m => m.id === id);
+  const seriesTitle = novelSeriesTitle();
+  if (i >= 0) { L.marks.splice(i, 1); toast('Penanda dihapus'); }
+  else {
+    L.marks.push({ id, slug: NR.key, title: seriesTitle, image: '', type: 'novel', chapterId: NR.ch.id, chapterTitle: cleanChapterTitle(NR.ch.title, seriesTitle), progress: 1, page: 0, ts: Date.now() });
+    toast('Penanda disimpan');
+  }
+  saveLNow();
+  const b = $('#nbmBtn'); if (b) b.classList.toggle('on', isNovelBm());
+}
+function openNovelSheet(type) {
+  const sh = $('#sheet'); if (!sh) return;
+  sheetOpen = true;
+  const seriesTitle = novelSeriesTitle();
+  if (type === 'chapters') {
+    const read = L.read[NR.key] || {};
+    const list = (NR.list || []).slice().reverse();
+    sh.innerHTML = `<div class="sheet-in"><div class="sheet-h"><h3>Daftar chapter</h3><button class="iconbtn" data-act="closesheet" aria-label="Tutup">${ico('x', 18)}</button></div>
+      ${list.length ? `<div class="chlist">${list.map(c => `<a class="chrow ${read[c.id] ? 'read' : ''} ${String(c.id) === String(NR.ch.id) ? 'cur' : ''}" href="${hrefRead(NR.key, c.id)}"><span class="n">${esc(cleanChapterTitle(c.title, seriesTitle))}</span><span class="ck">${ico('check', 16)}</span></a>`).join('')}</div>` : '<p class="muted">Daftar chapter singkat belum tersedia.</p>'}
+      <div style="margin-top:14px"><a class="btn" href="${hrefTitle(NR.key)}">Lihat semua chapter</a></div></div>`;
+  } else {
+    sh.innerHTML = `<div class="sheet-in"><div class="sheet-h"><h3>Setelan baca</h3><button class="iconbtn" data-act="closesheet" aria-label="Tutup">${ico('x', 18)}</button></div>
+      <div class="prow"><span class="lb">Jenis huruf</span>${seg('nrd.font', [['serif', 'Serif'], ['sans', 'Sans']])}</div>
+      <div class="prow"><span class="lb">Ukuran</span>${range('nrd.size', 16, 24, 1)}</div>
+      <div class="prow"><span class="lb">Tinggi baris</span>${range('nrd.lh', 1.4, 2.2, 0.05)}</div>
+      <div class="prow"><span class="lb">Jarak paragraf</span>${range('nrd.gap', 0.6, 1.6, 0.1)}</div>
+      <div class="prow"><span class="lb">Lebar kolom</span>${seg('nrd.width', [['s', 'Sempit'], ['m', 'Sedang'], ['l', 'Lebar'], ['f', 'Penuh']])}</div>
+      <div class="prow"><span class="lb">Latar</span>${seg('nrd.paper', [['white', 'Putih'], ['sepia', 'Sepia'], ['gray', 'Abu'], ['black', 'Gelap']])}</div>
+      <div class="prow"><span class="lb">Rata teks</span>${seg('nrd.align', [['left', 'Kiri'], ['justify', 'Rata']])}</div></div>`;
+  }
+  sh.hidden = false;
+  const cur = $('.chrow.cur', sh); if (cur) cur.scrollIntoView({ block: 'center' });
+}
+function onNovelKey(e) {
+  if (!NR.on || e.target.matches('input,textarea,select') || e.ctrlKey || e.metaKey || e.altKey) return;
+  const k = e.key, v = $('#nrv');
+  if (k === 'Escape') { if (sheetOpen) closeSheet(); else leaveNovel(); }
+  else if (sheetOpen) return;
+  else if (k === 'n' || k === 'N') goNovelChapter(NR.next && NR.next.id);
+  else if (k === 'p' || k === 'P') goNovelChapter(NR.prev && NR.prev.id);
+  else if (k === 'b' || k === 'B') toggleNovelBookmark();
+  else if (k === 'c' || k === 'C') openNovelSheet('chapters');
+  else if (k === 's' || k === 'S') openNovelSheet('settings');
+  else if (k === 'f' || k === 'F') { if (document.fullscreenElement) document.exitFullscreen(); else if (document.documentElement.requestFullscreen) document.documentElement.requestFullscreen().catch(() => {}); }
+  else if (k === 'j' || k === 'J') v.scrollBy({ top: v.clientHeight * 0.8, behavior: 'smooth' });
+  else if (k === 'k' || k === 'K') v.scrollBy({ top: -v.clientHeight * 0.8, behavior: 'smooth' });
+}
+
+/* ============================================================
    Event global
    ============================================================ */
 function prefChanged(p) {
   if (/^(theme|accent|density)$/.test(p)) applyTheme();
   if (p === 'site') { mc.clear(); route(); }
   if (R.on && /^rd\./.test(p)) applyReaderPrefs(p);
+  if (NR.on && /^nrd\./.test(p)) applyNovelPrefs();
 }
 document.addEventListener('click', e => {
   const sb = e.target.closest('.seg[data-set] button[data-v]');
@@ -825,11 +1265,17 @@ document.addEventListener('change', e => {
   const t = e.target;
   if (t.matches('[data-toggle]')) { setPath(S, t.dataset.toggle, t.checked); saveS(); prefChanged(t.dataset.toggle); }
   else if (t.matches('[data-act="shelf"]')) {
-    if (!D) return;
-    if (t.value) L.shelf[D.slug] = { status: t.value, item: D.item }; else delete L.shelf[D.slug];
+    const target = t.dataset.novel === '1' ? (N ? { key: N.key, item: novelItem() } : null) : (D ? { key: D.slug, item: D.item } : null);
+    if (!target) return;
+    if (t.value) L.shelf[target.key] = { status: t.value, item: target.item }; else delete L.shelf[target.key];
     saveLNow(); toast(t.value ? 'Masuk rak' : 'Keluar dari rak');
   }
   else if (t.id === 'bsort') { B.sort = t.value; renderBrowse(); }
+  else if (t.id === 'nsort') {
+    const params = new URLSearchParams(location.hash.split('?')[1] || '');
+    params.set('sort', t.value);
+    location.hash = '#/novels?' + params.toString();
+  }
   else if (t.id === 'impfile') importData(t.files[0]);
 });
 document.addEventListener('input', e => {
@@ -839,14 +1285,17 @@ document.addEventListener('input', e => {
     if (t.dataset.range === 'net.limit') { const o = $('#limOut'); if (o) o.textContent = t.value; updateMeter(); }
   }
   else if (t.id === 'chq' && D) { D.filter = t.value.trim(); D.limit = 100; renderChapters(); }
+  else if (t.id === 'nchq' && N) { N.filter = t.value.trim(); renderNovelChapters(); }
+  else if (t.dataset.range === 'nrd.size') { const o = $('#nvsizeOut'); if (o) o.textContent = t.value; }
 });
 document.addEventListener('submit', e => {
   if (e.target.id === 'gs') { e.preventDefault(); const q = $('#gq').value.trim(); if (q) { location.hash = `#/browse?q=${enc(q)}`; $('#gq').blur(); } }
   else if (e.target.id === 'bform') { e.preventDefault(); const q = $('#bq').value.trim(); location.hash = q ? `#/browse?q=${enc(q)}` : '#/browse'; }
+  else if (e.target.id === 'nform') { e.preventDefault(); const q = $('#nq').value.trim(); location.hash = q ? `#/novels?q=${enc(q)}` : '#/novels'; }
 });
 function pushSearch(q) { L.searches = [q, ...L.searches.filter(x => x !== q)].slice(0, 12); saveL(); }
 document.addEventListener('keydown', e => {
-  if (e.key === '/' && !R.on && !e.target.matches('input,textarea,select')) { e.preventDefault(); $('#gq').focus(); }
+  if (e.key === '/' && !R.on && !NR.on && !e.target.matches('input,textarea,select')) { e.preventDefault(); $('#gq').focus(); }
 });
 function saveApiFrom(sel) {
   const v = $(sel).value.trim().replace(/\/+$/, '');
@@ -897,6 +1346,25 @@ function act(a) {
     case 'pgprev': pageStep(-1); break;
     case 'pgnext': pageStep(1); break;
     case 'auto': closeSheet(); toggleAuto(); break;
+    case 'nchsort': {
+      if (!N) break;
+      N.order = N.order === 'desc' ? 'asc' : 'desc';
+      const d = $('#nchdir'); if (d) d.textContent = N.order === 'desc' ? 'Terbaru dulu' : 'Terlama dulu';
+      loadNovelChapters(true);
+      break;
+    }
+    case 'nchmore': loadNovelChapters(false); break;
+    case 'nfav':
+      if (!N) break;
+      if (isFav(N.key)) { delete L.favs[N.key]; toast('Dihapus dari favorit'); }
+      else { L.favs[N.key] = { item: novelItem(), ts: Date.now() }; toast('Masuk favorit'); }
+      saveLNow(); renderNovelActions(); break;
+    case 'ncopy': copyText(location.href); break;
+    case 'nbm': toggleNovelBookmark(); break;
+    case 'ntoc': openNovelSheet('chapters'); break;
+    case 'nsettings': openNovelSheet('settings'); break;
+    case 'nprev': goNovelChapter(NR.prev && NR.prev.id); break;
+    case 'nnext': goNovelChapter(NR.next && NR.next.id); break;
     default: break;
   }
 }

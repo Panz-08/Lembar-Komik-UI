@@ -319,6 +319,58 @@ body.reading .top, body.reading .tabbar, body.reading main#app { display: none; 
 .sheet .chlist { grid-template-columns: 1fr; }
 .sheet .chrow.cur { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, var(--surface)); }
 
+/* ---------- novel: sampul generatif, rak, detail ---------- */
+.nart { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: flex-start; justify-content: space-between; padding: 14px; color: #fff; overflow: hidden;
+  background: radial-gradient(120% 85% at 85% 0%, hsl(calc(var(--h) + 35) 82% 62% / .55), transparent 62%), linear-gradient(152deg, hsl(var(--h) 58% 34%), hsl(calc(var(--h) + 26) 66% 12%)); }
+.nart::before { content: ""; position: absolute; inset: 0; background: repeating-linear-gradient(115deg, rgba(255, 255, 255, .07) 0 1px, transparent 1px 15px); mix-blend-mode: overlay; pointer-events: none; }
+.nart::after { content: ""; position: absolute; left: 13px; top: 0; bottom: 0; width: 1px; background: rgba(255, 255, 255, .18); }
+.nart em { position: relative; z-index: 1; font: 800 9.5px var(--f-body); letter-spacing: .22em; text-transform: uppercase; opacity: .82; }
+.nart b { position: relative; z-index: 1; align-self: center; margin: auto 0; font: 800 clamp(40px, 4.6vw, 70px)/.8 var(--f-display); letter-spacing: -.07em; text-shadow: 0 6px 26px rgba(0, 0, 0, .38); }
+.nart small { position: relative; z-index: 1; font: 700 10.5px var(--f-body); opacity: .75; }
+.nart.big b { font-size: clamp(62px, 9vw, 116px); }
+.nart.sm { padding: 6px; }
+.nart.sm em { font-size: 6.5px; letter-spacing: .16em; }
+.nart.sm b { font-size: 22px; }
+.nart.sm small { font-size: 7px; }
+.nart.sm::after { left: 5px; }
+.nhero .hero-bg { filter: none; }
+.nhero .hero-in { min-height: 360px; }
+.nhero .hc { background: transparent; position: relative; }
+.nupd-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 10px; }
+.nupd { display: flex; align-items: center; gap: 12px; padding: 9px; background: var(--surface); border: 1px solid var(--line); border-radius: 16px; min-width: 0; transition: border-color .15s, transform .12s; }
+.nupd:hover { border-color: var(--accent); transform: translateY(-2px); }
+.nupd .art { position: relative; flex: 0 0 48px; aspect-ratio: 3 / 4; border-radius: 8px; overflow: hidden; background: var(--surface2); }
+.nupd .tx { flex: 1; min-width: 0; }
+.nupd .tx b { display: block; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.nupd .tx span { display: block; color: var(--muted); font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.nupd .tx em { display: block; font-style: normal; font-size: 11.5px; color: var(--muted); opacity: .8; margin-top: 2px; }
+.nupd .go { color: var(--accent); flex: none; }
+.nvabout { margin-top: 26px; }
+.nfacts { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px; margin-top: 16px; }
+.nfact { background: var(--surface); border: 1px solid var(--line); border-radius: 16px; padding: 13px 16px; min-width: 0; }
+.nfact span { display: block; color: var(--muted); font-size: 12px; }
+.nfact b { display: block; font: 700 14.5px var(--f-body); margin-top: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.nvbanner { background: hsl(var(--h, 240) 45% 18%); }
+.nvbanner i { background: radial-gradient(100% 130% at 78% 0%, hsl(calc(var(--h, 240) + 30) 75% 55% / .85), transparent 62%), linear-gradient(155deg, hsl(var(--h, 240) 55% 26%), #12141b 72%); filter: blur(18px) saturate(1.2); }
+
+/* ---------- pembaca novel ---------- */
+.nrd .nv { padding-top: 100px; }
+.nrd .nv-h { font-size: clamp(28px, 5.6vw, 44px); }
+.nv-lead { color: var(--muted); }
+.nv-preview { margin: 2em 0 0; padding: 20px 22px; border-radius: 20px; background: color-mix(in srgb, var(--accent) 10%, transparent); border: 1px solid color-mix(in srgb, var(--accent) 32%, transparent); font-family: var(--f-body); font-size: 14.5px; line-height: 1.6; text-align: left; }
+.nv-preview .k { display: block; font: 800 10.5px var(--f-body); letter-spacing: .16em; text-transform: uppercase; color: var(--accent); margin-bottom: 6px; }
+.nv-preview p { margin: 0 0 14px; }
+.nv-preview .acts { margin: 0; }
+.nv-nav { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 46px; font-family: var(--f-body); }
+.nv-nav a { display: block; border: 1px solid color-mix(in srgb, var(--rfg, currentColor) 22%, transparent); border-radius: 16px; padding: 13px 16px; min-width: 0; transition: border-color .15s; }
+.nv-nav a:hover { border-color: var(--accent); }
+.nv-nav a.next { text-align: right; }
+.nv-nav span { display: block; font-size: 11px; letter-spacing: .1em; text-transform: uppercase; opacity: .55; }
+.nv-nav b { display: block; font-size: 14px; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.nrd-cnum { font-weight: 700; font-size: 13px; white-space: nowrap; }
+.nrd .rd-prog { justify-content: center; gap: 6px; }
+.nrd .rd-prog .muted { color: inherit; opacity: .6; font-size: 12.5px; }
+
 #toast { position: fixed; left: 50%; bottom: 30px; transform: translate(-50%, 20px); background: var(--ink); color: var(--bg); padding: 11px 20px; border-radius: 999px; font-weight: 650; font-size: 14px; opacity: 0; pointer-events: none; transition: all .25s; z-index: 80; max-width: 90vw; text-align: center; box-shadow: var(--shadow); }
 #toast.on { opacity: 1; transform: translate(-50%, 0); }
 
@@ -344,6 +396,19 @@ body.reading .top, body.reading .tabbar, body.reading main#app { display: none; 
   .rk .no { font-size: 84px; margin-right: -20px; }
   .rd-prog span { min-width: 52px; }
   .prow input[type=range] { width: 100%; }
+  .nrd .nv { padding: 88px 20px 130px; }
+  .nv-nav { grid-template-columns: 1fr; margin-top: 34px; }
+  .nupd-grid { grid-template-columns: 1fr; }
+  .nfact { padding: 11px 13px; }
+  .nhero .hero-in { gap: 14px; padding: 18px 20px 30px; min-height: 0; }
+  .nhero .hc { width: 104px; }
+  .nhero h2 { font-size: 30px; margin: 10px 0; }
+  .nhero .meta { margin-bottom: 14px; }
+}
+@media (max-width: 420px) {
+  .tabbar a { font-size: 10.5px; }
+  .tabbar a svg { width: 20px; height: 20px; }
+  .nrd .nv { font-size: var(--nvsize, 17px); }
 }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
