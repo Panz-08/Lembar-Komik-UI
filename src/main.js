@@ -112,7 +112,11 @@ function merge(a, b) {
 }
 // Alamat API: kosong = domain yang sama (dev server meneruskan /api ke API lokal).
 // Untuk produksi isi lewat variabel VITE_API_BASE atau di Setelan.
-const ENV_API = String(import.meta.env.VITE_API_BASE || 'https://komik-api-pengembangan.vercel.app').replace(/\/+$/, '');
+// Di Wokku, UI memakai API yang juga jalan di Wokku; di Vercel tetap pakai API Vercel.
+const DEFAULT_API = location.hostname.endsWith('wokku.app')
+  ? 'https://komik-api-pengembangan.wokku.app'
+  : 'https://komik-api-pengembangan.vercel.app';
+const ENV_API = String(import.meta.env.VITE_API_BASE || DEFAULT_API).replace(/\/+$/, '');
 const SITE = 'komikindo';   // situs bawaan untuk data lama (tanpa awalan situs)
 const SITES = [['komikindo', 'Komikindo'], ['komiku', 'Komiku'], ['komiku-asia', 'Komiku Asia'], ['mgkomik', 'MGKomik'], ['shinigami', 'Shinigami']];
 const siteName = id => (SITES.find(x => x[0] === id) || [0, id])[1];
