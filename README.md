@@ -77,6 +77,31 @@ Kalau kolom alamat dikosongkan, Lembar memakai domain yang sama dengan tempat UI
 
 `vercel.json` sudah mengatur build dan cache untuk asset.
 
+## Deploy ke Wokku
+
+Lembar juga bisa jalan sebagai app Node.js di Wokku. Repo ini sudah menyiapkan `serve`:
+
+- `npm start` menjalankan `serve -s dist -l $PORT`.
+- `Procfile` berisi `web: npm start`.
+- Nixpacks otomatis menjalankan `npm run build` lalu `npm start`.
+
+Langkahnya:
+
+1. Buat app di dashboard Wokku, pilih server yang sudah terhubung.
+2. Tambahkan remote dan push:
+
+   ```bash
+   git remote add wokku git@git.wokku.cloud:lembar-komik-ui
+   git push wokku main
+   ```
+
+3. Kalau API juga jalan di Wokku, UI otomatis memakai
+   `https://komik-api-pengembangan.wokku.app` berdasarkan hostname `wokku.app`.
+   Di luar Wokku, UI tetap memakai API Vercel. `VITE_API_BASE` bisa dipakai untuk menimpa
+   keduanya saat build.
+
+Contoh hasil deploy: `https://lembar-komik-ui.wokku.app`.
+
 ## Struktur
 
 ```text
