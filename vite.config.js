@@ -13,7 +13,7 @@ export default defineConfig({
       registerType: 'autoUpdate',
       includeAssets: ['icons/icon-192.png', 'icons/icon-512.png', 'icons/icon-512-maskable.png'],
       manifest: {
-        name: 'Lembar — Baca Komik & Novel',
+        name: 'Lembar - Baca Komik & Novel',
         short_name: 'Lembar',
         description:
           'Baca komik dan novel dengan tampilan rapi. Riwayat, favorit, dan setelan tersimpan di browser.',

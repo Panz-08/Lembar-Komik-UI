@@ -31,7 +31,7 @@ const novelCoverArt = (it = {}, cls = '', label = '') => {
 };
 const cleanChapterTitle = (title, series) => {
   let t = String(title || '').trim();
-  if (series) t = t.replace(new RegExp('^\\s*' + reEsc(series) + '\\s*[–—:-]?\\s*', 'i'), '');
+  if (series) t = t.replace(new RegExp('^\\s*' + reEsc(series) + '\\s*[–-:-]?\\s*', 'i'), '');
   t = t.replace(/\s*Bahasa Indonesia\s*$/i, '').trim();
   return t || String(title || '').trim();
 };
@@ -393,8 +393,8 @@ async function viewNovelDetail(rawSlug) {
     <div class="acts" id="ndacts"></div></div></div></div>
     <section class="syn nvabout"><div><h2>Tentang novel ini</h2>${d.description ? `<p>${esc(d.description)}</p>` : ''}
       <div class="nfacts">
-        <div class="nfact"><span>Chapter pertama</span><b>${first ? esc(cleanChapterTitle(first.title, d.title)) : '—'}</b></div>
-        <div class="nfact"><span>Chapter terbaru</span><b>${latest ? esc(cleanChapterTitle(latest.title, d.title)) : '—'}</b></div>
+        <div class="nfact"><span>Chapter pertama</span><b>${first ? esc(cleanChapterTitle(first.title, d.title)) : '-'}</b></div>
+        <div class="nfact"><span>Chapter terbaru</span><b>${latest ? esc(cleanChapterTitle(latest.title, d.title)) : '-'}</b></div>
         <div class="nfact"><span>Total chapter</span><b>${Number(d.chapterCount).toLocaleString('id-ID')}</b></div>
         <div class="nfact"><span>Sumber</span><b>Sakuranovel</b></div>
       </div></div></section>

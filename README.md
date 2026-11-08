@@ -13,17 +13,17 @@ tidak ada login. Semua riwayat, favorit, dan setelan disimpan di browser lewat `
 
 ## Fitur
 
-- **Komik** — cari lintas situs, detail komik, daftar chapter, dan pembaca webtoon/manga.
-- **Novel** — rak novel populer, update chapter terbaru, pencarian, detail novel, dan daftar chapter.
-- **Pembaca novel** — teks chapter lengkap dengan tipografi serif/sans, ukuran huruf, tinggi
+- **Komik** - cari lintas situs, detail komik, daftar chapter, dan pembaca webtoon/manga.
+- **Novel** - rak novel populer, update chapter terbaru, pencarian, detail novel, dan daftar chapter.
+- **Pembaca novel** - teks chapter lengkap dengan tipografi serif/sans, ukuran huruf, tinggi
   baris, lebar kolom, latar putih/sepia/abu/gelap, dan rata teks. Nyaman buat sesi baca panjang.
-- **Pustaka** — lanjut baca, favorit, rak baca, dan penanda. Komik dan novel masuk ke pustaka yang sama.
-- **Tema** — terang, gelap, atau ikut sistem. Warna aksen bisa diganti.
-- **Hemat request** — cache sementara, antrian request, dan batas per menit supaya API tidak kena limit.
-- **PWA & offline** — bisa di-install ke home screen. Shell aplikasi, metadata, dan gambar chapter
+- **Pustaka** - lanjut baca, favorit, rak baca, dan penanda. Komik dan novel masuk ke pustaka yang sama.
+- **Tema** - terang, gelap, atau ikut sistem. Warna aksen bisa diganti.
+- **Hemat request** - cache sementara, antrian request, dan batas per menit supaya API tidak kena limit.
+- **PWA & offline** - bisa di-install ke home screen. Shell aplikasi, metadata, dan gambar chapter
   yang sudah pernah dibuka disimpan di Cache Storage, jadi chapter tersebut tetap terbaca saat
-  koneksi putus. Muncul indikator “Offline — menampilkan data tersimpan” saat offline.
-- **Mobile friendly** — navigasi bawah, target sentuh besar, dan pembaca layar penuh.
+  koneksi putus. Muncul indikator “Offline - menampilkan data tersimpan” saat offline.
+- **Mobile friendly** - navigasi bawah, target sentuh besar, dan pembaca layar penuh.
 
 ## PWA & cache offline
 
