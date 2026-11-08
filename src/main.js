@@ -812,6 +812,9 @@ async function testApi() {
    ============================================================ */
 const R = { on: false };
 let rafAuto = 0, io = null, sheetOpen = false;
+// Elemen pemicu sheet, supaya fokus bisa dikembalikan saat sheet ditutup.
+let sheetTrigger = null;
+const FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
 function stopReader() {
   if (R.on) { saveProgress(true); saveLNow(); }
   R.on = false; R.auto = false;
@@ -819,6 +822,8 @@ function stopReader() {
   if (io) { io.disconnect(); io = null; }
   document.removeEventListener('keydown', onKey);
   sheetOpen = false;
+  sheetTrigger = null;
+  setSheetBackgroundInert(false);
 }
 const readerSkeleton = () => `<div class="rd" data-bg="${S.rd.bg}"><div class="rd-top"><a class="ib" href="#/home" aria-label="Kembali">${ico('left')}</a><div class="rd-ttl"><b>Memuat…</b></div></div><div class="rd-view" style="display:grid;place-items:center"><div class="sk" style="width:min(520px,90%);height:60vh"></div></div></div>`;
 async function viewRead(slug, chapterId, q) {
@@ -1010,7 +1015,56 @@ function toggleAuto() {
   };
   rafAuto = requestAnimationFrame(step);
 }
-function openSheet(type) {
+function sheetFocusables(sh) {
+  return Array.from(sh.querySelectorAll(FOCUSABLE))
+    .filter(el => !el.disabled && el.getClientRects().length > 0);
+}
+function setSheetBackgroundInert(on) {
+  document.querySelectorAll('.rd > .rd-top, .rd > .rd-view, .rd > .rd-bot, .rd > .rd-line').forEach(el => {
+    if (on) el.setAttribute('inert', '');
+    else el.removeAttribute('inert');
+  });
+}
+function prepareSheet(sh, trigger) {
+  sheetTrigger = trigger || document.activeElement;
+  sh.hidden = false;
+  sh.setAttribute('role', 'dialog');
+  sh.setAttribute('aria-modal', 'true');
+  const title = sh.querySelector('.sheet-h h3');
+  if (title) {
+    title.id = 'sheet-title';
+    sh.setAttribute('aria-labelledby', title.id);
+  }
+  setSheetBackgroundInert(true);
+  const close = sh.querySelector('[data-act="closesheet"]');
+  const target = close || sheetFocusables(sh)[0] || sh;
+  target.focus({ preventScroll: true });
+}
+function trapSheetFocus(e) {
+  if (!sheetOpen || e.key !== 'Tab') return;
+  const sh = $('#sheet');
+  if (!sh || sh.hidden) return;
+  const items = sheetFocusables(sh);
+  if (!items.length) { e.preventDefault(); return; }
+  const first = items[0], last = items[items.length - 1];
+  const active = document.activeElement;
+  if (e.shiftKey) {
+    if (active === first || !sh.contains(active)) { e.preventDefault(); last.focus({ preventScroll: true }); }
+  } else if (active === last || !sh.contains(active)) {
+    e.preventDefault(); first.focus({ preventScroll: true });
+  }
+}
+document.addEventListener('keydown', trapSheetFocus);
+// Jaga fokus tetap di dalam sheet walaupun ada yang mencoba memindahkannya.
+document.addEventListener('focusin', e => {
+  if (!sheetOpen) return;
+  const sh = $('#sheet');
+  if (sh && !sh.hidden && !sh.contains(e.target)) {
+    const f = sheetFocusables(sh)[0];
+    if (f) f.focus({ preventScroll: true });
+  }
+});
+function openSheet(type, trigger) {
   const sh = $('#sheet'); if (!sh) return;
   sheetOpen = true;
   if (type === 'chapters') {
@@ -1018,7 +1072,7 @@ function openSheet(type) {
     const list = R.asc.slice().reverse();
     sh.innerHTML = `<div class="sheet-in"><div class="sheet-h"><h3>Daftar chapter</h3><button class="iconbtn" data-act="closesheet" aria-label="Tutup">${ico('x', 18)}</button></div>
       ${list.length ? `<div class="chlist">${list.map(c => `<a class="chrow ${read[c.id] ? 'read' : ''} ${c.id === R.chapterId ? 'cur' : ''}" href="${hrefRead(R.slug, c.id)}" ${c.id === R.chapterId ? 'id="curch"' : ''}><span class="n">${esc(c.title)}</span><span class="ck">${ico('check', 16)}</span></a>`).join('')}</div>` : '<p class="muted">Daftar chapter nggak tersedia buat judul ini.</p>'}</div>`;
-    sh.hidden = false;
+    prepareSheet(sh, trigger);
     const c = $('#curch'); if (c) c.scrollIntoView({ block: 'center' });
   } else {
     sh.innerHTML = `<div class="sheet-in"><div class="sheet-h"><h3>Setelan baca</h3><button class="iconbtn" data-act="closesheet" aria-label="Tutup">${ico('x', 18)}</button></div>
@@ -1029,21 +1083,38 @@ function openSheet(type) {
       <div class="prow"><span class="lb">Kecerahan</span>${range('rd.bright', 40, 120, 5)}</div>
       <div class="prow"><span class="lb">Gulir otomatis</span><div style="display:flex;gap:10px;align-items:center">${range('rd.speed', 1, 10, 1)}<button class="btn sm" data-act="auto">${ico('play', 14)} Mulai</button></div></div>
       <div class="prow"><span class="lb">Sembunyikan bilah saat menggulir</span>${toggle('rd.autoHide')}</div></div>`;
-    sh.hidden = false;
+    prepareSheet(sh, trigger);
   }
 }
-function closeSheet() { const sh = $('#sheet'); if (sh) sh.hidden = true; sheetOpen = false; const v = $('#rdv') || $('#nrv'); if (v) v.focus({ preventScroll: true }); }
+function closeSheet() {
+  const sh = $('#sheet'); if (!sh) return;
+  sh.hidden = true;
+  sheetOpen = false;
+  setSheetBackgroundInert(false);
+  const trigger = sheetTrigger;
+  sheetTrigger = null;
+  if (trigger && document.contains(trigger) && typeof trigger.focus === 'function') {
+    trigger.focus({ preventScroll: true });
+    return;
+  }
+  const v = $('#rdv') || $('#nrv'); if (v) v.focus({ preventScroll: true });
+}
 function onKey(e) {
-  if (!R.on || e.target.matches('input,textarea,select') || e.ctrlKey || e.metaKey || e.altKey) return;
+  if (!R.on || e.ctrlKey || e.metaKey || e.altKey) return;
   const k = e.key, v = $('#rdv');
   const paged = S.rd.mode !== 'scroll';
-  if (k === 'Escape') { if (sheetOpen) closeSheet(); else leave(); }
-  else if (sheetOpen) return;
-  else if (k === 'n' || k === 'N') goChapter(R.next);
+  if (k === 'Escape') {
+    e.preventDefault();
+    if (sheetOpen) closeSheet(); else leave();
+    return;
+  }
+  if (e.target.matches('input,textarea,select')) return;
+  if (sheetOpen) return;
+  if (k === 'n' || k === 'N') goChapter(R.next);
   else if (k === 'p' || k === 'P') goChapter(R.prev);
   else if (k === 'b' || k === 'B') toggleBookmark();
-  else if (k === 'c' || k === 'C') openSheet('chapters');
-  else if (k === 's' || k === 'S') openSheet('settings');
+  else if (k === 'c' || k === 'C') openSheet('chapters', $('[data-act="chsheet"]'));
+  else if (k === 's' || k === 'S') openSheet('settings', $('[data-act="rdsheet"]'));
   else if (k === 'a' || k === 'A') toggleAuto();
   else if (k === 'f' || k === 'F') { if (document.fullscreenElement) document.exitFullscreen(); else if (document.documentElement.requestFullscreen) document.documentElement.requestFullscreen().catch(() => {}); }
   else if (paged && (k === 'ArrowRight' || k === 'ArrowLeft' || k === ' ')) { e.preventDefault(); const rtl = S.rd.mode === 'rtl'; pageStep(k === ' ' ? 1 : (k === 'ArrowRight') === !rtl ? 1 : -1); }
@@ -1061,6 +1132,8 @@ function stopNovelReader() {
   NR.on = false;
   document.removeEventListener('keydown', onNovelKey);
   sheetOpen = false;
+  sheetTrigger = null;
+  setSheetBackgroundInert(false);
 }
 async function findNovelNeighbors(slug, ch) {
   if (!slug) return { prev: null, next: null, list: [] };
@@ -1229,7 +1302,7 @@ function toggleNovelBookmark() {
   saveLNow();
   const b = $('#nbmBtn'); if (b) b.classList.toggle('on', isNovelBm());
 }
-function openNovelSheet(type) {
+function openNovelSheet(type, trigger) {
   const sh = $('#sheet'); if (!sh) return;
   sheetOpen = true;
   const seriesTitle = novelSeriesTitle();
@@ -1249,19 +1322,24 @@ function openNovelSheet(type) {
       <div class="prow"><span class="lb">Latar</span>${seg('nrd.paper', [['white', 'Putih'], ['sepia', 'Sepia'], ['gray', 'Abu'], ['black', 'Gelap']])}</div>
       <div class="prow"><span class="lb">Rata teks</span>${seg('nrd.align', [['left', 'Kiri'], ['justify', 'Rata']])}</div></div>`;
   }
-  sh.hidden = false;
+  prepareSheet(sh, trigger);
   const cur = $('.chrow.cur', sh); if (cur) cur.scrollIntoView({ block: 'center' });
 }
 function onNovelKey(e) {
-  if (!NR.on || e.target.matches('input,textarea,select') || e.ctrlKey || e.metaKey || e.altKey) return;
+  if (!NR.on || e.ctrlKey || e.metaKey || e.altKey) return;
   const k = e.key, v = $('#nrv');
-  if (k === 'Escape') { if (sheetOpen) closeSheet(); else leaveNovel(); }
-  else if (sheetOpen) return;
-  else if (k === 'n' || k === 'N') goNovelChapter(NR.next && NR.next.id);
+  if (k === 'Escape') {
+    e.preventDefault();
+    if (sheetOpen) closeSheet(); else leaveNovel();
+    return;
+  }
+  if (e.target.matches('input,textarea,select')) return;
+  if (sheetOpen) return;
+  if (k === 'n' || k === 'N') goNovelChapter(NR.next && NR.next.id);
   else if (k === 'p' || k === 'P') goNovelChapter(NR.prev && NR.prev.id);
   else if (k === 'b' || k === 'B') toggleNovelBookmark();
-  else if (k === 'c' || k === 'C') openNovelSheet('chapters');
-  else if (k === 's' || k === 'S') openNovelSheet('settings');
+  else if (k === 'c' || k === 'C') openNovelSheet('chapters', $('[data-act="ntoc"]'));
+  else if (k === 's' || k === 'S') openNovelSheet('settings', $('[data-act="nsettings"]'));
   else if (k === 'f' || k === 'F') { if (document.fullscreenElement) document.exitFullscreen(); else if (document.documentElement.requestFullscreen) document.documentElement.requestFullscreen().catch(() => {}); }
   else if (k === 'j' || k === 'J') v.scrollBy({ top: v.clientHeight * 0.8, behavior: 'smooth' });
   else if (k === 'k' || k === 'K') v.scrollBy({ top: -v.clientHeight * 0.8, behavior: 'smooth' });
@@ -1370,8 +1448,8 @@ function act(a) {
       else { L = clone(LDEF); S = clone(DEF); saveS(); saveLNow(); applyTheme(); viewSettings(); toast('Semua data dihapus'); }
       break;
     case 'bm': toggleBookmark(); break;
-    case 'chsheet': openSheet('chapters'); break;
-    case 'rdsheet': openSheet('settings'); break;
+    case 'chsheet': openSheet('chapters', a); break;
+    case 'rdsheet': openSheet('settings', a); break;
     case 'closesheet': closeSheet(); break;
     case 'prevch': goChapter(R.prev); break;
     case 'nextch': goChapter(R.next); break;
@@ -1393,8 +1471,8 @@ function act(a) {
       saveLNow(); renderNovelActions(); break;
     case 'ncopy': copyText(location.href); break;
     case 'nbm': toggleNovelBookmark(); break;
-    case 'ntoc': openNovelSheet('chapters'); break;
-    case 'nsettings': openNovelSheet('settings'); break;
+    case 'ntoc': openNovelSheet('chapters', a); break;
+    case 'nsettings': openNovelSheet('settings', a); break;
     case 'nprev': goNovelChapter(NR.prev && NR.prev.id); break;
     case 'nnext': goNovelChapter(NR.next && NR.next.id); break;
     default: break;
@@ -1427,6 +1505,13 @@ document.addEventListener('error', e => {
 /* ============================================================
    Mulai
    ============================================================ */
+function updateOffline() {
+  const el = $('#offline');
+  if (el) el.hidden = navigator.onLine;
+}
+window.addEventListener('online', updateOffline);
+window.addEventListener('offline', updateOffline);
+updateOffline();
 $('#themeBtn').addEventListener('click', () => {
   S.theme = { auto: 'light', light: 'dark', dark: 'auto' }[S.theme] || 'auto';
   saveS(); applyTheme(); toast('Tema: ' + { auto: 'ikut sistem', light: 'terang', dark: 'gelap' }[S.theme]);

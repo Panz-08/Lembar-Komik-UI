@@ -20,7 +20,25 @@ tidak ada login. Semua riwayat, favorit, dan setelan disimpan di browser lewat `
 - **Pustaka** — lanjut baca, favorit, rak baca, dan penanda. Komik dan novel masuk ke pustaka yang sama.
 - **Tema** — terang, gelap, atau ikut sistem. Warna aksen bisa diganti.
 - **Hemat request** — cache sementara, antrian request, dan batas per menit supaya API tidak kena limit.
+- **PWA & offline** — bisa di-install ke home screen. Shell aplikasi, metadata, dan gambar chapter
+  yang sudah pernah dibuka disimpan di Cache Storage, jadi chapter tersebut tetap terbaca saat
+  koneksi putus. Muncul indikator “Offline — menampilkan data tersimpan” saat offline.
 - **Mobile friendly** — navigasi bawah, target sentuh besar, dan pembaca layar penuh.
+
+## PWA & cache offline
+
+Lembar memakai [`vite-plugin-pwa`](https://vite-pwa-org.netlify.app/) untuk menghasilkan
+`manifest.webmanifest` dan service worker saat build. Setelah halaman dibuka sekali:
+
+- Shell aplikasi (HTML/JS/CSS/ikon) di-*precache*.
+- Gambar chapter di-cache dengan strategi **CacheFirst**, maksimal 120 gambar / 7 hari.
+- Metadata komik, chapter, dan novel di-cache dengan **StaleWhileRevalidate**, maksimal
+  200 entri / 24 jam.
+- Chapter yang sudah pernah dibuka tetap bisa dibaca saat offline. Cache lama dibersihkan
+  otomatis saat service worker diperbarui.
+
+Untuk memasang: buka situs di Chrome/Edge/Android, lalu pilih **Install app** atau
+**Tambahkan ke layar utama**. Build tetap statis dan tidak butuh server tambahan.
 
 ## Catatan soal novel
 
