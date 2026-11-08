@@ -1,5 +1,8 @@
 # Lembar
 
+[![CI](https://github.com/Panz-08/Lembar-Komik-UI/actions/workflows/ci.yml/badge.svg)](https://github.com/Panz-08/Lembar-Komik-UI/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
 Web buat baca **komik dan novel** dalam satu tempat. Tampilannya sengaja dibuat tenang: rak komik
 yang rapi, rak novel dengan sampul generatif, dan pembaca novel dengan tipografi yang enak buat
 dibaca lama.
