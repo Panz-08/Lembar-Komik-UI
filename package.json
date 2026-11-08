@@ -11,7 +11,7 @@
     "start": "serve -s dist -l $PORT"
   },
   "devDependencies": {
-    "vite": "^8.3.5",
+    "vite": "^8.3.6",
     "vite-plugin-pwa": "^2.0.0"
   },
   "engines": {
