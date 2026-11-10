@@ -12,7 +12,9 @@ const API_BASE = String(
   process.env.KOMIK_API_BASE || 'https://komik-api-pengembangan.vercel.app',
 ).replace(/\/+$/, '');
 
-const API_KEY = String(process.env.KOMIK_API_KEY || '').trim();
+// Kalau yang ditempel ternyata daftar API_KEYS (dipisah koma), pakai kunci pertama.
+// API hanya butuh satu kunci yang valid.
+const API_KEY = String(process.env.KOMIK_API_KEY || '').trim().split(',')[0].trim();
 
 const parsedTimeout = Number(process.env.KOMIK_PROXY_TIMEOUT_MS || 60000);
 const TIMEOUT_MS = Number.isFinite(parsedTimeout) && parsedTimeout > 0
