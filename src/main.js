@@ -208,7 +208,12 @@ async function request(path, attempt = 0) {
   } finally { clearTimeout(to); }
   let j = null;
   try { j = JSON.parse(text); } catch (_) { /* bukan JSON */ }
-  if (!j || typeof j !== 'object' || !('success' in j)) throw new ApiError('Alamat itu bukan API Komik Scraper (balasannya bukan JSON yang dikenal). Cek Alamat API di Setelan.', r.status, 'NOT_API');
+  if (!j || typeof j !== 'object' || !('success' in j)) {
+    // Balasan bukan JSON yang dikenal (mis. halaman HTML dari platform).
+    // Sertakan status dan potongan body supaya penyebabnya kelihatan.
+    const s = String(text || '').replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 140);
+    throw new ApiError('Balasan API tidak dikenali (HTTP ' + r.status + ')' + (s ? ': ' + s : '') + '. Cek Alamat API di Setelan.', r.status, 'NOT_API');
+  }
   if (r.status === 429 || j.code === 'RATE_LIMIT') {
     cooldownUntil = Date.now() + 20000;
     if (attempt < 1) { toast('Kena limit dari API, istirahat 20 detik lalu coba lagi otomatis…'); return request(path, attempt + 1); }

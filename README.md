@@ -11,7 +11,7 @@ Lembar adalah frontend Vite yang mengambil data dari
 [Komik & Novel API](https://github.com/Panz-08/komik-api-pengembangan). Tidak ada database.
 Semua riwayat, favorit, dan setelan disimpan di browser lewat `localStorage`.
 
-Di Vercel, request `/api/*` diteruskan oleh fungsi `api/[...path].js` yang menyimpan API key
+Di Vercel, request `/api/*` diteruskan oleh fungsi `api/index.js` yang menyimpan API key
 di server. Jadi API key tidak ikut ke bundle JavaScript atau DevTools.
 
 ## Fitur
@@ -85,7 +85,7 @@ npm run preview
 ## Alamat API
 
 Di Vercel, biarkan alamat API **kosong**. Lembar memanggil `/api/...` di domainnya sendiri,
-lalu `api/[...path].js` menambahkan `KOMIK_API_KEY` di server dan meneruskannya ke API.
+lalu `api/index.js` menambahkan `KOMIK_API_KEY` di server dan meneruskannya ke API.
 
 Alamat API bisa ditimpa lewat:
 
@@ -152,7 +152,7 @@ Langkahnya:
 3. Kalau API juga jalan di Wokku, UI otomatis memakai
    `https://komik-api-pengembangan.wokku.app` berdasarkan hostname `wokku.app`.
    Di luar Wokku, UI memakai proxy same-origin di deployment Vercel.
-   Proxy `api/[...path].js` hanya tersedia di Vercel; kalau API Wokku dikunci dengan
+   Proxy `api/index.js` hanya tersedia di Vercel; kalau API Wokku dikunci dengan
    `API_KEYS`, gunakan deployment Vercel atau tambahkan proxy sendiri di Wokku.
    `VITE_API_BASE` bisa dipakai untuk menimpa alamat API saat build.
 
@@ -164,9 +164,9 @@ Contoh hasil deploy: `https://lembar-komik-ui.wokku.app`.
 index.html          shell aplikasi, font, dan metadata
 src/main.js         router, data API, semua tampilan, pembaca komik & novel
 src/style.css       tema, komponen, dan tipografi
-api/[...path].js    proxy /api server-side yang menyimpan API key
+api/index.js        proxy /api server-side yang menyimpan API key
 vite.config.js      dev server + proxy /api
-vercel.json         konfigurasi deploy + maxDuration proxy
+vercel.json         konfigurasi deploy + rewrite /api + maxDuration proxy
 .env.example        contoh env untuk dev
 ```
 
