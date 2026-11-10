@@ -110,13 +110,18 @@ function merge(a, b) {
   }
   return a;
 }
-// Alamat API: kosong = domain yang sama (dev server meneruskan /api ke API lokal).
-// Untuk produksi isi lewat variabel VITE_API_BASE atau di Setelan.
-// Di Wokku, UI memakai API yang juga jalan di Wokku; di Vercel tetap pakai API Vercel.
-const DEFAULT_API = location.hostname.endsWith('wokku.app')
-  ? 'https://komik-api-pengembangan.wokku.app'
-  : 'https://komik-api-pengembangan.vercel.app';
-const ENV_API = String(import.meta.env.VITE_API_BASE || DEFAULT_API).replace(/\/+$/, '');
+// Alamat API. Di Vercel, kosong = domain yang sama: request /api diteruskan
+// oleh api/[...path].js yang menyimpan API key di server (tidak pernah ke browser).
+// Di Wokku tidak ada proxy itu, jadi UI memakai API Wokku secara langsung.
+// VITE_API_BASE tetap bisa dipakai untuk menimpa alamat API saat build.
+const IS_WOKKU = location.hostname.endsWith('wokku.app');
+const DEFAULT_API = IS_WOKKU ? 'https://komik-api-pengembangan.wokku.app' : '';
+const RAW_ENV_API = String(import.meta.env.VITE_API_BASE || '').replace(/\/+$/, '');
+const OLD_VERCEL_API = 'https://komik-api-pengembangan.vercel.app';
+// Jangan biarkan build lama masih memanggil API Vercel langsung: arahkan ke proxy.
+const ENV_API = (!IS_WOKKU && RAW_ENV_API === OLD_VERCEL_API)
+  ? ''
+  : (RAW_ENV_API || DEFAULT_API);
 const SITE = 'komikindo';   // situs bawaan untuk data lama (tanpa awalan situs)
 const SITES = [['komikindo', 'Komikindo'], ['komiku', 'Komiku'], ['komiku-asia', 'Komiku Asia'], ['mgkomik', 'MGKomik'], ['shinigami', 'Shinigami']];
 const siteName = id => (SITES.find(x => x[0] === id) || [0, id])[1];
@@ -134,6 +139,12 @@ const DEF = {
 };
 const LDEF = { favs: {}, hist: {}, read: {}, shelf: {}, marks: [], searches: [] };
 let S = merge(clone(DEF), store.get('lembar2.settings', {}));
+// Migrasi setelan lama: dulu alamat API Vercel disimpan eksplisit di localStorage.
+// Sekarang alamat itu harus kosong agar lewat proxy same-origin yang menyimpan API key.
+if (!IS_WOKKU && String(S.api || '').replace(/\/+$/, '') === OLD_VERCEL_API) {
+  S.api = '';
+  store.set('lembar2.settings', S);
+}
 let L = merge(clone(LDEF), store.get('lembar2.library', {}));
 const saveS = () => store.set('lembar2.settings', S);
 const saveLNow = () => store.set('lembar2.library', L);
@@ -763,7 +774,7 @@ function viewSettings() {
     <div class="prow"><span class="lb">Warna aksen</span><div class="swatches">${Object.entries(ACC).map(([k, a]) => `<button class="swatch ${S.accent === k ? 'on' : ''}" data-act="accent" data-v="${k}" style="background:${a[0]}" title="${a[2]}" aria-label="${a[2]}"></button>`).join('')}</div></div>
     <div class="prow"><span class="lb">Ukuran kartu<small>Berapa banyak judul per baris</small></span>${seg('density', [['s', 'Kecil'], ['m', 'Sedang'], ['l', 'Besar']])}</div></section>
   <section class="panel"><h2>API</h2><p>Lembar membaca komik dan novel dari API Komik &amp; Novel milikmu (komik: Komikindo, Komiku, Komiku Asia, MGKomik, Shinigami; novel: Sakuranovel).</p>
-    <div class="prow"><label for="baseIn" class="lb">Alamat API<small>Kosong = domain yang sama. Lokal biasanya <code>http://localhost:3000</code></small></label><div style="display:flex;gap:8px;flex:1;min-width:260px"><input class="txt" id="baseIn" value="${esc(S.api)}" placeholder="(domain yang sama)" spellcheck="false"><button class="btn" data-act="saveapi">Simpan</button></div></div>
+    <div class="prow"><label for="baseIn" class="lb">Alamat API<small>Kosong = lewat proxy aman di domain ini (API key disimpan di server). Lokal biasanya <code>http://localhost:3000</code></small></label><div style="display:flex;gap:8px;flex:1;min-width:260px"><input class="txt" id="baseIn" value="${esc(S.api)}" placeholder="(domain yang sama)" spellcheck="false"><button class="btn" data-act="saveapi">Simpan</button></div></div>
     <div class="prow"><span class="lb">Gambar lewat proxy API<small>Disarankan. Dipakai buat melewati anti-hotlink situs sumber</small></span>${toggle('net.imgProxy')}</div>
     <div class="prow"><span class="lb">Tes koneksi<small>Memanggil /api/sites dan /api/novels</small></span><button class="btn" data-act="testapi">${ico('refresh', 16)} Tes sekarang</button></div><div class="status" id="apistatus"></div></section>
   <section class="panel"><h2>Batas request</h2><p>API kamu membatasi request per menit per IP. Lembar punya antrian sendiri supaya tidak kena blokir.</p>

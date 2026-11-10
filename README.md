@@ -7,9 +7,12 @@ Web buat baca **komik dan novel** dalam satu tempat. Tampilannya sengaja dibuat 
 yang rapi, rak novel dengan sampul generatif, dan pembaca novel dengan tipografi yang enak buat
 dibaca lama.
 
-Lembar adalah frontend statis (Vite) yang mengambil data dari
-[Komik & Novel API](https://github.com/Panz-08/komik-api-pengembangan). Tidak ada database dan
-tidak ada login. Semua riwayat, favorit, dan setelan disimpan di browser lewat `localStorage`.
+Lembar adalah frontend Vite yang mengambil data dari
+[Komik & Novel API](https://github.com/Panz-08/komik-api-pengembangan). Tidak ada database.
+Semua riwayat, favorit, dan setelan disimpan di browser lewat `localStorage`.
+
+Di Vercel, request `/api/*` diteruskan oleh fungsi `api/[...path].js` yang menyimpan API key
+di server. Jadi API key tidak ikut ke bundle JavaScript atau DevTools.
 
 ## Fitur
 
@@ -60,11 +63,17 @@ npm run dev
 ```
 
 Buka `http://localhost:5173`. Saat mode dev, request `/api` diteruskan ke `http://localhost:3000`
-(tempat API jalan). Kalau API-mu di alamat lain:
+(tempat API jalan). Kalau API-mu di alamat lain dan sudah dikunci, isi `API_TARGET` dan
+`KOMIK_API_KEY` lewat shell atau `.env.local`:
 
 ```bash
-API_TARGET=https://komik-api-pengembangan.vercel.app npm run dev
+API_TARGET=https://komik-api-pengembangan.vercel.app \
+KOMIK_API_KEY=isi_api_key_kamu \
+npm run dev
 ```
+
+Atau salin `.env.example` menjadi `.env.local`. `KOMIK_API_KEY` sengaja tanpa prefix `VITE_`
+supaya hanya dibaca dev server, bukan dikirim ke browser.
 
 Build produksi:
 
@@ -75,13 +84,10 @@ npm run preview
 
 ## Alamat API
 
-Secara bawaan Lembar memakai:
+Di Vercel, biarkan alamat API **kosong**. Lembar memanggil `/api/...` di domainnya sendiri,
+lalu `api/[...path].js` menambahkan `KOMIK_API_KEY` di server dan meneruskannya ke API.
 
-```text
-https://komik-api-pengembangan.vercel.app
-```
-
-Alamat ini bisa diganti lewat:
+Alamat API bisa ditimpa lewat:
 
 1. Variabel lingkungan `VITE_API_BASE` saat build, atau
 2. Menu **Setelan → API** di aplikasi (tanpa perlu build ulang).
@@ -93,10 +99,37 @@ Kalau kolom alamat dikosongkan, Lembar memakai domain yang sama dengan tempat UI
 1. Push repo ini ke GitHub.
 2. Buka [vercel.com/new](https://vercel.com/new), import repo.
 3. Framework preset: **Vite**. Build command: `npm run build`. Output: `dist`.
-4. (Opsional) tambahkan `VITE_API_BASE` kalau API-mu bukan default.
-5. Deploy.
+4. Tambahkan environment variable:
 
-`vercel.json` sudah mengatur build dan cache untuk asset.
+   | Nama | Wajib | Keterangan |
+   |------|-------|------------|
+   | `KOMIK_API_KEY` | ya | API key dari project `komik-api-pengembangan` |
+   | `KOMIK_API_BASE` | tidak | Default: `https://komik-api-pengembangan.vercel.app` |
+   | `KOMIK_PROXY_TIMEOUT_MS` | tidak | Default: `60000` |
+
+   Jangan memakai prefix `VITE_` untuk `KOMIK_API_KEY`. Kalau dulu pernah mengisi
+   `VITE_API_BASE` dengan alamat API Vercel, hapus variabel itu agar Lembar memakai proxy.
+
+5. Deploy, lalu redeploy setelah mengubah environment variable.
+
+### Wajib untuk pemakaian pribadi
+
+Karena Lembar punya proxy yang menyimpan API key, siapa pun yang bisa membuka UI juga bisa
+memakai API lewat proxy. Supaya hanya kamu yang bisa memakainya:
+
+1. Buka **Vercel → Project Lembar → Settings → Deployment Protection**.
+2. Pilih **Vercel Authentication**.
+3. Pilih scope **All Deployments** (Production + Preview).
+4. Simpan, lalu buka Lembar sambil login dengan akun Vercel kamu.
+
+Vercel Authentication gratis di semua paket. Dengan ini, orang lain harus login ke akun
+Vercel yang punya akses ke project; mereka tidak bisa membuka UI maupun endpoint `/api`
+proxy-nya.
+
+Kalau UI dibiarkan publik, API kamu juga efektif publik lewat proxy, walaupun API key-nya
+tidak terlihat di browser.
+
+`vercel.json` sudah mengatur build, cache asset, dan `maxDuration` fungsi proxy.
 
 ## Deploy ke Wokku
 
@@ -118,8 +151,10 @@ Langkahnya:
 
 3. Kalau API juga jalan di Wokku, UI otomatis memakai
    `https://komik-api-pengembangan.wokku.app` berdasarkan hostname `wokku.app`.
-   Di luar Wokku, UI tetap memakai API Vercel. `VITE_API_BASE` bisa dipakai untuk menimpa
-   keduanya saat build.
+   Di luar Wokku, UI memakai proxy same-origin di deployment Vercel.
+   Proxy `api/[...path].js` hanya tersedia di Vercel; kalau API Wokku dikunci dengan
+   `API_KEYS`, gunakan deployment Vercel atau tambahkan proxy sendiri di Wokku.
+   `VITE_API_BASE` bisa dipakai untuk menimpa alamat API saat build.
 
 Contoh hasil deploy: `https://lembar-komik-ui.wokku.app`.
 
@@ -129,8 +164,10 @@ Contoh hasil deploy: `https://lembar-komik-ui.wokku.app`.
 index.html          shell aplikasi, font, dan metadata
 src/main.js         router, data API, semua tampilan, pembaca komik & novel
 src/style.css       tema, komponen, dan tipografi
+api/[...path].js    proxy /api server-side yang menyimpan API key
 vite.config.js      dev server + proxy /api
-vercel.json         konfigurasi deploy
+vercel.json         konfigurasi deploy + maxDuration proxy
+.env.example        contoh env untuk dev
 ```
 
 ## Pintasan
