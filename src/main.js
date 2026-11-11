@@ -31,7 +31,7 @@ const novelCoverArt = (it = {}, cls = '', label = '') => {
 };
 const cleanChapterTitle = (title, series) => {
   let t = String(title || '').trim();
-  if (series) t = t.replace(new RegExp('^\\s*' + reEsc(series) + '\\s*[–-:-]?\\s*', 'i'), '');
+  if (series) t = t.replace(new RegExp('^\\s*' + reEsc(series) + '\\s*(?:[–—:\\-]\\s*)?', 'i'), '');
   t = t.replace(/\s*Bahasa Indonesia\s*$/i, '').trim();
   return t || String(title || '').trim();
 };
@@ -194,14 +194,42 @@ async function slot() {
 class ApiError extends Error {
   constructor(msg, status, code) { super(msg); this.status = status; this.code = code; }
 }
+// Jaring pengaman UI: jangan biarkan skeleton "loading" selamanya kalau server
+// atau service worker tidak pernah menyelesaikan request.
+function withDeadline(promise, ms = 20000, message = 'Server kelamaan jawab. Coba lagi sebentar ya.') {
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new ApiError(message, 0, 'TIMEOUT')), ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
 const base = () => S.api.replace(/\/+$/, '');
-const absUrl = u => (!u ? '' : /^(https?:|data:|blob:)/i.test(u) ? u : base() + (u.startsWith('/') ? u : '/' + u));
+// Saat alamat API kosong, request /api/... lewat proxy di domain sendiri (Vercel).
+// Rewrite Vercel hanya meneruskan path tujuan (/api/index), jadi path asli ikut
+// dikirim lewat __path supaya api/index.js tetap tahu endpoint yang diminta.
+const proxyPath = path => {
+  const only = String(path || '').replace(/^\//, '').split('?')[0];
+  return enc(only);
+};
+const proxyUrl = path => {
+  const url = base() + '/api' + path;
+  if (base() || !String(path).startsWith('/')) return url;
+  return url + (String(path).includes('?') ? '&' : '?') + '__path=' + proxyPath(path);
+};
+const absUrl = u => {
+  if (!u) return '';
+  if (/^(https?:|data:|blob:)/i.test(u)) return u;
+  const path = u.startsWith('/') ? u : '/' + u;
+  if (!base() && path.startsWith('/api/')) return proxyUrl(path.slice('/api'.length));
+  return base() + path;
+};
 async function request(path, attempt = 0) {
-  await slot();
+  // Timer dipasang sebelum antrian supaya request tidak bisa "loading" selamanya
+  // hanya karena menunggu slot di antrian.
   const ctl = new AbortController();
   const to = setTimeout(() => ctl.abort(), 30000);
   let r, text;
-  try { r = await fetch(base() + '/api' + path, { signal: ctl.signal }); text = await r.text(); }
+  try { await slot(); r = await fetch(proxyUrl(path), { signal: ctl.signal }); text = await r.text(); }
   catch (e) {
     if (e && e.name === 'AbortError') throw new ApiError('Servernya kelamaan jawab. Coba lagi sebentar ya.', 0, 'TIMEOUT');
     throw new ApiError('Nggak bisa nyambung ke API' + (base() ? ' di ' + base() : '') + '. Pastikan API kamu lagi jalan (npm start) dan alamatnya benar.', 0, 'NETWORK');
@@ -358,7 +386,7 @@ async function viewNovels(q) {
       <div class="toolbar"><select class="sel" id="nsort" aria-label="Urutkan novel">${sortOpt('popular', 'Paling populer')}${sortOpt('newest', 'Terbaru')}${sortOpt('title', 'Judul A–Z')}</select><span class="muted" id="ncount"></span></div>
       <div id="nres">${skelGrid(12)}</div>`);
     try {
-      const r = await nApi.list({ q: query, limit: 30, sort });
+      const r = await withDeadline(nApi.list({ q: query, limit: 30, sort }), 20000);
       if (my !== navToken) return;
       $('#nres').innerHTML = r.items.length ? novelGrid(r.items) : `<div class="state"><h3>Belum ketemu</h3><p>Nggak ada novel yang cocok dengan “${esc(query)}”. Coba kata kunci lain atau cek ejaannya.</p><a class="btn pri" href="#/novels">Jelajahi rak novel</a></div>`;
       const c = $('#ncount'); if (c) c.textContent = r.items.length + ' judul';
@@ -373,31 +401,38 @@ async function viewNovels(q) {
     <section class="sec"><div class="sec-h"><h2>${popTitle}</h2><a class="more" href="#/novels?sort=popular">Lihat semua ${ico('right', 16)}</a></div><div id="npop">${skelGrid(12)}</div></section>
     <section class="sec" id="ngenres"></section>`);
   const [popR, latestR, genresR] = await Promise.allSettled([
-    nApi.list({ limit: 14, sort }),
-    nApi.latest({ limit: 12 }),
-    nApi.genres({ limit: 24 })
+    withDeadline(nApi.list({ limit: 14, sort }), 20000),
+    withDeadline(nApi.latest({ limit: 12 }), 20000),
+    withDeadline(nApi.genres({ limit: 24 }), 20000)
   ]);
   if (my !== navToken) return;
-  if (popR.status === 'fulfilled') {
-    const heroItems = popR.value.items.filter(n => n.title).slice(0, 4);
-    $('#nheroBox').innerHTML = heroItems.length ? novelHeroHTML(heroItems) : '';
-    $('#npop').innerHTML = popR.value.items.length ? novelGrid(popR.value.items) : '<div class="state"><p style="margin:0">Belum ada novel.</p></div>';
-    startHero();
-  } else {
-    $('#nheroBox').innerHTML = '';
-    $('#npop').innerHTML = errorBlock(popR.reason);
+  try {
+    if (popR.status === 'fulfilled') {
+      const heroItems = popR.value.items.filter(n => n.title).slice(0, 4);
+      $('#nheroBox').innerHTML = heroItems.length ? novelHeroHTML(heroItems) : '';
+      $('#npop').innerHTML = popR.value.items.length ? novelGrid(popR.value.items) : '<div class="state"><p style="margin:0">Belum ada novel.</p></div>';
+      startHero();
+    } else {
+      $('#nheroBox').innerHTML = '';
+      $('#npop').innerHTML = errorBlock(popR.reason);
+    }
+    $('#nlatest').innerHTML = latestR.status === 'fulfilled'
+      ? (latestR.value.items.length ? latestR.value.items.slice(0, 12).map(novelUpdateRow).join('') : '<div class="state"><p style="margin:0">Belum ada update chapter.</p></div>')
+      : errorBlock(latestR.reason);
+    const genres = genresR.status === 'fulfilled' ? genresR.value : [];
+    $('#ngenres').innerHTML = genres.length ? `<div class="sec-h"><h2>Genre populer</h2><span class="muted" style="font-size:13px">dari Sakuranovel</span></div><div class="chips">${genres.map(g => `<a class="chip" href="${esc(g.url)}" target="_blank" rel="noopener" title="Buka genre ${esc(g.name)} di Sakuranovel">${esc(g.name)} <span class="muted">${g.count}</span></a>`).join('')}</div>` : '';
+  } catch (e) {
+    // Kalau ada data rusak yang bikin render gagal, tetap tampilkan error,
+    // jangan tinggalkan skeleton di layar.
+    const box = $('#npop') || $('#nlatest');
+    if (box) box.innerHTML = errorBlock(e);
   }
-  $('#nlatest').innerHTML = latestR.status === 'fulfilled'
-    ? (latestR.value.items.length ? latestR.value.items.slice(0, 12).map(novelUpdateRow).join('') : '<div class="state"><p style="margin:0">Belum ada update chapter.</p></div>')
-    : errorBlock(latestR.reason);
-  const genres = genresR.status === 'fulfilled' ? genresR.value : [];
-  $('#ngenres').innerHTML = genres.length ? `<div class="sec-h"><h2>Genre populer</h2><span class="muted" style="font-size:13px">dari Sakuranovel</span></div><div class="chips">${genres.map(g => `<a class="chip" href="${esc(g.url)}" target="_blank" rel="noopener" title="Buka genre ${esc(g.name)} di Sakuranovel">${esc(g.name)} <span class="muted">${g.count}</span></a>`).join('')}</div>` : '';
 }
 async function viewNovelDetail(rawSlug) {
   const my = ++navToken;
   setApp('<div class="dh"><div class="dcover sk"></div><div><div class="sk" style="height:46px;width:70%"></div><div class="sk" style="height:16px;width:40%;margin-top:14px"></div><div class="sk" style="height:44px;width:60%;margin-top:26px"></div></div></div>');
   let d;
-  try { d = await nApi.detail(rawSlug); } catch (e) { if (my === navToken) setApp(errorBlock(e)); return; }
+  try { d = await withDeadline(nApi.detail(rawSlug), 20000); } catch (e) { if (my === navToken) setApp(errorBlock(e)); return; }
   if (my !== navToken) return;
   N = { key: d.slug, d, items: [], page: 1, hasNext: true, order: 'desc', filter: '', loading: false };
   const h = L.hist[N.key];
@@ -445,7 +480,7 @@ async function loadNovelChapters(first) {
   if (first && box) box.innerHTML = '<div class="state"><p style="margin:0">Memuat daftar chapter…</p></div>';
   const page = first ? 1 : N.page;
   try {
-    const r = await nApi.chapters(N.d.rawSlug, { page, limit: 50, order: N.order });
+    const r = await withDeadline(nApi.chapters(N.d.rawSlug, { page, limit: 50, order: N.order }), 20000);
     if (!N) return;
     if (first) { N.items = []; N.page = 1; }
     N.items.push(...r.items);
@@ -833,7 +868,7 @@ async function diagFetch(path) {
   const to = setTimeout(() => ctl.abort(), 15000);
   const t0 = performance.now();
   try {
-    const r = await fetch(base() + '/api' + path, { cache: 'no-store', signal: ctl.signal });
+    const r = await fetch(proxyUrl(path), { cache: 'no-store', signal: ctl.signal });
     const text = await r.text();
     let j = null;
     try { j = JSON.parse(text); } catch (_) { /* bukan JSON */ }
@@ -1287,7 +1322,7 @@ async function viewNovelRead(rawSlug, chapterId, q) {
   document.body.classList.add('reading');
   const el = $('#reader');
   el.innerHTML = `<div class="rd nrd" data-paper="sepia"><div class="rd-top"><a class="ib" href="#/novels" aria-label="Kembali">${ico('left')}</a><div class="rd-ttl"><b>Memuat chapter…</b></div></div><div class="rd-view" style="display:grid;place-items:center"><div class="sk" style="width:min(560px,88%);height:60vh"></div></div></div>`;
-  const [cr, dr] = await Promise.allSettled([nApi.chapter(chapterId), nApi.detail(rawSlug)]);
+  const [cr, dr] = await Promise.allSettled([withDeadline(nApi.chapter(chapterId), 25000), withDeadline(nApi.detail(rawSlug), 20000)]);
   if (my !== navToken) return;
   if (cr.status === 'rejected') {
     el.innerHTML = `<div class="rd nrd" data-paper="sepia"><div class="rd-top"><a class="ib" href="#/novels" aria-label="Kembali">${ico('left')}</a><div class="rd-ttl"><b>Gagal memuat chapter</b></div></div><div class="rd-view" style="display:grid;place-items:center;padding:20px"><div style="max-width:560px">${errorBlock(cr.reason)}</div></div></div>`;
@@ -1299,7 +1334,7 @@ async function viewNovelRead(rawSlug, chapterId, q) {
   // Detail cuma dipakai kalau memang novel yang sama; jangan sampai jumlah chapter
   // dari novel lain kepakai gara-gara slug di URL keliru.
   const det = got && (!ch.series || !ch.series.slug || got.rawSlug === ch.series.slug) ? got : null;
-  const nb = await findNovelNeighbors(slug, ch);
+  const nb = await withDeadline(findNovelNeighbors(slug, ch), 20000).catch(() => ({ prev: null, next: null, list: [] }));
   if (my !== navToken) return;
   NR = {
     on: true, slug, key: nk(slug), ch, det,

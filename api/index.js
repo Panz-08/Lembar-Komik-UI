@@ -56,19 +56,29 @@ async function proxy(req, res) {
     return sendJson(res, 405, 'METHOD_NOT_ALLOWED', 'Hanya GET/HEAD yang didukung.');
   }
 
-  // req.url berisi path lengkap, mis. /api/novels?limit=5. Vercel mempertahankan
-  // path asli walau request sudah di-rewrite ke /api/index.
+  // req.url bisa berisi path lengkap (/api/novels?limit=5) atau hanya
+  // /api/index setelah rewrite Vercel. Klien mengirim path asli lewat __path,
+  // dan rewrite/route lain bisa memakai bentuk /api/index/<path>.
   const incoming = new URL(req.url, 'http://localhost');
   const params = new URLSearchParams(incoming.search);
   let pathname = incoming.pathname;
 
-  // Jaring pengaman kalau suatu saat path asli tidak ikut terbawa rewrite.
-  if (pathname === '/api' || pathname === '/api/index' || pathname === '/api/index.js') {
-    const override = params.get('__path');
-    if (override != null) {
-      params.delete('__path');
-      pathname = `/api/${String(override).replace(/^\/+/, '')}`;
-    }
+  const override = params.get('__path');
+  if (override != null) {
+    params.delete('__path');
+    pathname = `/api/${String(override).replace(/^\/+/, '')}`;
+  } else if (pathname.startsWith('/api/index/')) {
+    pathname = `/api/${pathname.slice('/api/index/'.length)}`;
+  } else if (pathname === '/api' || pathname === '/api/index' || pathname === '/api/index.js') {
+    // Jaring pengaman kalau path asli tidak ikut terbawa rewrite dan klien lama
+    // belum mengirim __path. Lebih baik error jelas daripada diteruskan ke /api/index.
+    return sendJson(
+      res,
+      500,
+      'PROXY_ROUTE',
+      'Proxy tidak menerima path API yang valid. Muat ulang halaman lalu coba lagi.',
+      { path: pathname },
+    );
   }
 
   if (!pathname.startsWith('/api/')) {
