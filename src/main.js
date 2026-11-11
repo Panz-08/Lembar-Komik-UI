@@ -541,6 +541,7 @@ function route() {
   window.scrollTo(0, 0);
   if (page === 'title' && s.length >= 2) { updateChrome('title'); return viewTitle(s[1]); }
   if (page === 'novel' && s.length >= 2) { updateChrome('novel'); return viewNovelDetail(s[1]); }
+  if (page === 'diag') { updateChrome('diag'); return viewDiag(); }
   if (page === 'novels') { updateChrome('novels'); return viewNovels(q); }
   if (page === 'browse') { updateChrome('browse'); return viewBrowse(q); }
   if (page === 'library') { updateChrome('library'); return viewLibrary(s[1] || 'continue'); }
@@ -781,7 +782,7 @@ function viewSettings() {
   <section class="panel"><h2>API</h2><p>Lembar membaca komik dan novel dari API Komik &amp; Novel milikmu (komik: Komikindo, Komiku, Komiku Asia, MGKomik, Shinigami; novel: Sakuranovel).</p>
     <div class="prow"><label for="baseIn" class="lb">Alamat API<small>Kosong = lewat proxy aman di domain ini (API key disimpan di server). Lokal biasanya <code>http://localhost:3000</code></small></label><div style="display:flex;gap:8px;flex:1;min-width:260px"><input class="txt" id="baseIn" value="${esc(S.api)}" placeholder="(domain yang sama)" spellcheck="false"><button class="btn" data-act="saveapi">Simpan</button></div></div>
     <div class="prow"><span class="lb">Gambar lewat proxy API<small>Disarankan. Dipakai buat melewati anti-hotlink situs sumber</small></span>${toggle('net.imgProxy')}</div>
-    <div class="prow"><span class="lb">Tes koneksi<small>Memanggil /api/sites dan /api/novels</small></span><button class="btn" data-act="testapi">${ico('refresh', 16)} Tes sekarang</button></div><div class="status" id="apistatus"></div></section>
+    <div class="prow"><span class="lb">Tes koneksi<small>Memanggil /api/sites dan /api/novels</small></span><div class="acts" style="margin:0"><button class="btn" data-act="testapi">${ico('refresh', 16)} Tes sekarang</button><a class="btn" href="#/diag">Diagnosa</a></div></div><div class="status" id="apistatus"></div></section>
   <section class="panel"><h2>Batas request</h2><p>API kamu membatasi request per menit per IP. Lembar punya antrian sendiri supaya tidak kena blokir.</p>
     <div class="prow"><span class="lb">Batas per menit<small>Bawaan API: 120 (RATE_LIMIT di .env). Disarankan sedikit di bawahnya</small></span><div style="display:flex;gap:10px;align-items:center">${range('net.limit', 10, 120, 1)}<b id="limOut" style="min-width:30px">${S.net.limit}</b></div></div>
     <div class="prow" style="display:block"><span class="lb">Pemakaian sekarang</span><div class="meter" id="meter"><b></b></div><div class="status" id="meterTxt"></div></div>
@@ -821,6 +822,98 @@ async function testApi() {
   if (novels.status === 'fulfilled') bits.push(`novel: ${novelTotal == null ? 'siap' : novelTotal + ' judul'}`);
   st.className = 'status ' + (ok ? 'ok' : 'err');
   st.textContent = (ok ? '✓' : '✗') + ` Nyambung ke ${base() || 'domain yang sama'} (${ms} ms) · ` + (bits.join(' · ') || (sites.reason && sites.reason.message) || 'gagal');
+}
+
+/* ============================================================
+   Diagnosa (#/diag)
+   Halaman kecil buat melihat antrian request dan waktu tiap endpoint.
+   ============================================================ */
+async function diagFetch(path) {
+  const ctl = new AbortController();
+  const to = setTimeout(() => ctl.abort(), 15000);
+  const t0 = performance.now();
+  try {
+    const r = await fetch(base() + '/api' + path, { cache: 'no-store', signal: ctl.signal });
+    const text = await r.text();
+    let j = null;
+    try { j = JSON.parse(text); } catch (_) { /* bukan JSON */ }
+    return {
+      ms: Math.round(performance.now() - t0), status: r.status, bytes: text.length,
+      json: Boolean(j && typeof j === 'object' && 'success' in j),
+      code: j && j.code, error: j && j.error,
+    };
+  } catch (e) {
+    return { ms: Math.round(performance.now() - t0), error: e && e.name === 'AbortError' ? 'timeout 15 dtk' : String(e && e.message) };
+  } finally { clearTimeout(to); }
+}
+const diagLine = (name, r) => r.error
+  ? `${name}\n  GAGAL setelah ${r.ms} ms · ${r.error}`
+  : `${name}\n  HTTP ${r.status} · ${r.ms} ms · ${r.bytes} byte · JSON ${r.json ? 'ya' : 'TIDAK'}${r.code ? ' · ' + r.code : ''}${r.error ? ' · ' + r.error : ''}`;
+async function viewDiag() {
+  navToken++;
+  setApp(`<div class="page-h"><div><h1>Diagnosa</h1><p class="sub">Cek antrian request dan waktu tiap endpoint.</p></div></div>
+    <div class="set"><section class="panel"><h2>Hasil</h2><p>Halaman ini memanggil API langsung (tanpa antrian) lalu lewat antrian aplikasi.</p>
+    <pre id="diagOut" style="white-space:pre-wrap;word-break:break-word;font:13px/1.65 ui-monospace,SFMono-Regular,Menlo,monospace;margin:0">Menjalankan…</pre>
+    <div class="acts" style="margin-top:14px"><button class="btn" data-act="diagrun">Jalankan ulang</button><a class="btn" href="#/settings">Ke Setelan</a></div></section></div>`);
+  await runDiag();
+}
+async function runDiag() {
+  const el = $('#diagOut'); if (!el) return;
+  const lines = [];
+  const sw = ('serviceWorker' in navigator && navigator.serviceWorker.controller) ? 'aktif' : 'tidak aktif';
+  const cool = Math.max(0, cooldownUntil - Date.now());
+  lines.push(`alamat API   : ${base() || '(domain sendiri, lewat proxy)'}`);
+  lines.push(`batas/menit  : ${limitN()} · terpakai ${winUsed()} · cooldown ${cool ? Math.round(cool / 1000) + ' dtk' : '-'}`);
+  lines.push(`service work : ${sw} · online ${navigator.onLine ? 'ya' : 'tidak'}`);
+  el.textContent = lines.join('\n') + '\n\nMengukur…';
+
+  const endpoints = [
+    ['/sites', 'sites'],
+    ['/novels?limit=1&sort=popular', 'novels list'],
+    ['/novels/release-that-witch', 'novel detail'],
+    ['/novels/release-that-witch/chapters?page=1&limit=50&order=desc', 'novel chapters'],
+  ];
+
+  for (const [path, label] of endpoints) {
+    const direct = await diagFetch(path);
+    lines.push('');
+    lines.push(diagLine(`[langsung] ${label} (${path})`, direct));
+
+    const t0 = performance.now();
+    const usedBefore = winUsed();
+    const cap = limitN();
+    let viaApp;
+    try {
+      viaApp = await Promise.race([
+        get(path, 0).then(() => ({ ms: Math.round(performance.now() - t0), status: 200, ok: true })),
+        new Promise(resolve => setTimeout(
+          () => resolve({ ms: Math.round(performance.now() - t0), error: 'tidak selesai dalam 20 dtk' }),
+          20000,
+        )),
+      ]);
+    } catch (e) {
+      viaApp = { ms: Math.round(performance.now() - t0), error: (e && e.message) || 'gagal' };
+    }
+    const queueNote = usedBefore >= cap ? 'antrian penuh' : `antrian ${usedBefore}/${cap}`;
+    lines.push(`[aplikasi] ${label} · ${queueNote}`);
+    lines.push(viaApp.error
+      ? `  GAGAL setelah ${viaApp.ms} ms · ${viaApp.error}`
+      : `  selesai ${viaApp.ms} ms`);
+    el.textContent = lines.join('\n');
+  }
+
+  // Resource yang lambat, kalau ada.
+  try {
+    const slow = performance.getEntriesByType('resource')
+      .filter(e => /\/api\//.test(e.name) && e.duration > 2000)
+      .sort((a, b) => b.duration - a.duration)
+      .slice(0, 5);
+    lines.push('');
+    lines.push(slow.length
+      ? 'Request /api yang lambat:\n' + slow.map(e => `  ${Math.round(e.duration)} ms · ${e.name.replace(location.origin, '')}`).join('\n')
+      : 'Tidak ada request /api yang lebih dari 2 detik.');
+  } catch (_) { /* ignore */ }
+  el.textContent = lines.join('\n');
 }
 
 /* ============================================================
@@ -1457,6 +1550,7 @@ function act(a) {
     case 'saveapi': saveApiFrom('#baseIn'); break;
     case 'setapi': if (saveApiFrom('#apiIn')) route(); break;
     case 'testapi': testApi(); break;
+    case 'diagrun': runDiag(); break;
     case 'export': exportData(); break;
     case 'clear-hist': L.hist = {}; saveLNow(); toast('Riwayat dihapus'); break;
     case 'clear-all':
