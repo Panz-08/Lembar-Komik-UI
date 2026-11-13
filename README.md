@@ -21,6 +21,8 @@ di server. Jadi API key tidak ikut ke bundle JavaScript atau DevTools.
 - **Pembaca novel** - teks chapter lengkap dengan tipografi serif/sans, ukuran huruf, tinggi
   baris, lebar kolom, latar putih/sepia/abu/gelap, dan rata teks. Nyaman buat sesi baca panjang.
 - **Pustaka** - lanjut baca, favorit, rak baca, dan penanda. Komik dan novel masuk ke pustaka yang sama.
+- **Statistik baca** - target chapter harian, streak hari beruntun, grafik 14 hari, dan judul yang
+  paling banyak dibaca. Semua dihitung lokal tanpa mengirim data ke mana pun.
 - **Tema** - terang, gelap, atau ikut sistem. Warna aksen bisa diganti.
 - **Hemat request** - cache sementara, antrian request, dan batas per menit supaya API tidak kena limit.
 - **PWA & offline** - bisa di-install ke home screen. Shell aplikasi, metadata, dan gambar chapter

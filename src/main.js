@@ -133,11 +133,12 @@ const DEF = {
   api: ENV_API,
   theme: 'auto', accent: 'coral', density: 'm',
   site: 'all',
+  goal: 3,
   net: { limit: 100, imgProxy: true },
   rd: { mode: 'scroll', width: 'm', gap: 's', bg: 'black', autoHide: true, prefetch: true, bright: 100, speed: 4 },
   nrd: { font: 'serif', size: 19, lh: 1.8, gap: 1, width: 'm', paper: 'sepia', align: 'left' }
 };
-const LDEF = { favs: {}, hist: {}, read: {}, shelf: {}, marks: [], searches: [] };
+const LDEF = { favs: {}, hist: {}, read: {}, shelf: {}, marks: [], searches: [], activity: {} };
 let S = merge(clone(DEF), store.get('lembar2.settings', {}));
 // Migrasi setelan lama: dulu alamat API Vercel disimpan eksplisit di localStorage.
 // Sekarang alamat itu harus kosong agar lewat proxy same-origin yang menyimpan API key.
@@ -505,7 +506,78 @@ function renderNovelChapters() {
 const isFav = slug => !!L.favs[slug];
 function histList() { return Object.entries(L.hist).map(([slug, h]) => ({ slug, ...h })).sort((a, b) => b.ts - a.ts); }
 const readCount = () => Object.values(L.read).reduce((n, o) => n + Object.keys(o).length, 0);
-function markRead(slug, ch) { (L.read[slug] = L.read[slug] || {})[ch] = 1; saveL(); }
+
+/* ---------- statistik baca (disimpan lokal, tanpa server) ---------- */
+const DAY_MS = 86400000;
+const dayKey = (ts = Date.now()) => {
+  const d = new Date(ts);
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+};
+// Pakai tengah hari supaya perhitungan selisih hari tetap aman saat DST.
+const dayAnchor = (ts = Date.now()) => { const d = new Date(ts); d.setHours(12, 0, 0, 0); return d; };
+const activityCount = (key = dayKey()) => Math.max(0, Number(L.activity && L.activity[key]) || 0);
+function bumpActivity(n = 1) {
+  if (!L.activity || typeof L.activity !== 'object') L.activity = {};
+  const key = dayKey();
+  L.activity[key] = activityCount(key) + n;
+  // Jaga data tetap kecil: simpan 400 hari terakhir saja.
+  const keys = Object.keys(L.activity).sort();
+  if (keys.length > 400) keys.slice(0, keys.length - 400).forEach(k => delete L.activity[k]);
+}
+function readingStreak() {
+  const cursor = dayAnchor();
+  if (!activityCount(dayKey(cursor))) cursor.setDate(cursor.getDate() - 1);
+  let current = 0;
+  while (activityCount(dayKey(cursor))) { current += 1; cursor.setDate(cursor.getDate() - 1); }
+
+  const keys = Object.keys(L.activity || {}).filter(k => activityCount(k) > 0).sort();
+  let best = 0, run = 0, prev = null;
+  for (const key of keys) {
+    const time = new Date(key + 'T12:00:00').getTime();
+    if (!Number.isFinite(time)) continue;
+    run = prev !== null && Math.round((time - prev) / DAY_MS) === 1 ? run + 1 : 1;
+    if (run > best) best = run;
+    prev = time;
+  }
+  return { current, best: Math.max(best, current) };
+}
+function activitySeries(days = 14) {
+  const out = [];
+  const cursor = dayAnchor();
+  cursor.setDate(cursor.getDate() - (days - 1));
+  for (let i = 0; i < days; i += 1) {
+    const key = dayKey(cursor);
+    out.push({
+      key,
+      count: activityCount(key),
+      label: cursor.toLocaleDateString('id-ID', { weekday: 'short' }),
+      full: cursor.toLocaleDateString('id-ID', { day: 'numeric', month: 'short' }),
+      today: key === dayKey()
+    });
+    cursor.setDate(cursor.getDate() + 1);
+  }
+  return out;
+}
+function libItem(slug) {
+  return (L.hist[slug] && L.hist[slug].item) ||
+    (L.favs[slug] && L.favs[slug].item) ||
+    (L.shelf[slug] && L.shelf[slug].item) ||
+    L.marks.find(m => m.slug === slug) || null;
+}
+function topRead(limit = 5) {
+  return Object.entries(L.read)
+    .map(([slug, chapters]) => ({ slug, count: Object.keys(chapters || {}).length, item: libItem(slug) }))
+    .filter(x => x.count > 0)
+    .sort((a, b) => b.count - a.count)
+    .slice(0, limit);
+}
+
+function markRead(slug, ch) {
+  const book = (L.read[slug] = L.read[slug] || {});
+  // Nilai lama berupa angka 1. Nilai baru menyimpan waktu baca pertama.
+  if (!book[ch]) { book[ch] = Date.now(); bumpActivity(1); }
+  saveL();
+}
 
 /* ============================================================
    Komponen UI
@@ -763,7 +835,7 @@ function renderChapters() {
    ============================================================ */
 function viewLibrary(tab) {
   navToken++;
-  const tabs = [['continue', 'Lanjutin'], ['fav', 'Favorit'], ['shelf', 'Rak baca'], ['marks', 'Penanda']];
+  const tabs = [['continue', 'Lanjutin'], ['fav', 'Favorit'], ['shelf', 'Rak baca'], ['marks', 'Penanda'], ['stats', 'Statistik']];
   const emptyMsg = t => `<div class="state"><h3>${t}</h3><p>Mulai baca dari Beranda atau Cari, nanti koleksimu muncul di sini. Semuanya disimpan di browser ini.</p><a class="btn pri" href="#/browse">Cari bacaan</a></div>`;
   let body = '';
   if (tab === 'continue') {
@@ -782,6 +854,44 @@ function viewLibrary(tab) {
     const names = { reading: 'Lagi dibaca', plan: 'Mau dibaca', done: 'Udah tamat' };
     const all = Object.values(L.shelf);
     body = all.length ? Object.keys(names).map(st => { const g = all.filter(x => x.status === st); return g.length ? `<section class="sec" style="margin-top:0;margin-bottom:26px"><div class="sec-h"><h2>${names[st]} <span class="muted" style="font-weight:500">(${g.length})</span></h2></div><div class="grid">${g.map(x => card(x.item)).join('')}</div></section>` : ''; }).join('') : emptyMsg('Rak masih kosong');
+  } else if (tab === 'stats') {
+    const goal = Math.max(1, Math.round(Number(S.goal) || 3));
+    const today = activityCount();
+    const pct = Math.min(100, Math.round(today / goal * 100));
+    const streak = readingStreak();
+    const series = activitySeries(14);
+    const peak = Math.max(goal, ...series.map(d => d.count), 1);
+    const activeDays = Object.values(L.activity || {}).filter(n => Number(n) > 0).length;
+    const top = topRead(5);
+    const left = Math.max(0, goal - today);
+    body = `<section class="panel statspanel">
+      <h2>Target hari ini</h2>
+      <p>${left === 0 ? 'Target tercapai. Mantap, jangan lupa istirahat.' : `Sisa ${left} chapter lagi buat capai target harianmu.`}</p>
+      <div class="goalbar" role="progressbar" aria-valuemin="0" aria-valuemax="${goal}" aria-valuenow="${Math.min(today, goal)}" aria-label="Target chapter hari ini"><b style="width:${pct}%"></b></div>
+      <div class="goalmeta"><span>${today} dari ${goal} chapter</span><b>${pct}%</b></div>
+    </section>
+    <div class="stats" style="margin-top:16px">
+      <div class="stat"><b>${streak.current}</b><span>Hari beruntun</span></div>
+      <div class="stat"><b>${streak.best}</b><span>Rekor beruntun</span></div>
+      <div class="stat"><b>${activeDays}</b><span>Hari aktif</span></div>
+      <div class="stat"><b>${readCount()}</b><span>Chapter kelar</span></div>
+    </div>
+    <section class="panel">
+      <h2>Aktivitas 14 hari</h2>
+      <p>Tiap batang adalah jumlah chapter yang selesai dibaca pada hari itu.</p>
+      <div class="actchart" role="img" aria-label="Grafik chapter yang dibaca dalam 14 hari terakhir">${series.map(d => `<div class="actday" title="${esc(d.full)}: ${d.count} chapter"><div class="acttrack"><b class="${d.today ? 'today' : ''}${d.count ? '' : ' empty'}" style="height:${Math.max(4, Math.round(d.count / peak * 100))}%"></b></div><span>${esc(d.label)}</span></div>`).join('')}</div>
+    </section>
+    <section class="panel" style="margin-top:16px">
+      <h2>Paling banyak dibaca</h2>
+      ${top.length ? `<div class="rows">${top.map(x => {
+        const item = x.item || { title: isNovelKey(x.slug) ? rawNovel(x.slug) : sp(x.slug).id, type: isNovelKey(x.slug) ? 'novel' : 'comic' };
+        return `<div class="lrow"><a class="th" href="${hrefTitle(x.slug)}">${thumbInner(item)}</a>
+        <div class="tx"><b>${esc(item.title || x.slug)}</b><span>${x.count.toLocaleString('id-ID')} chapter selesai</span></div>
+        <a class="btn sm" href="${hrefTitle(x.slug)}">Buka</a></div>`;
+      }).join('')}</div>` : '<p class="muted">Belum ada data. Selesaikan satu chapter dulu, nanti statistiknya muncul di sini.</p>'}
+    </section>
+    <div class="acts" style="margin-top:16px"><button class="btn" data-act="reset-activity">Reset statistik</button></div>
+    <p class="muted" style="font-size:12.5px;margin-top:8px">Statistik dihitung sejak fitur ini aktif dan disimpan di browser ini saja. Tanda "sudah dibaca" dari sebelumnya tetap dihitung sebagai chapter selesai.</p>`;
   } else {
     const ms = L.marks.slice().sort((a, b) => b.ts - a.ts);
     body = ms.length ? `<div class="rows">${ms.map(m => {
@@ -839,6 +949,8 @@ function viewSettings() {
     <div class="prow"><span class="lb">Lebar kolom</span>${seg('nrd.width', [['s', 'Sempit'], ['m', 'Sedang'], ['l', 'Lebar'], ['f', 'Penuh']])}</div>
     <div class="prow"><span class="lb">Latar baca</span>${seg('nrd.paper', [['white', 'Putih'], ['sepia', 'Sepia'], ['gray', 'Abu'], ['black', 'Gelap']])}</div>
     <div class="prow"><span class="lb">Rata teks</span>${seg('nrd.align', [['left', 'Kiri'], ['justify', 'Rata kanan-kiri']])}</div></section>
+  <section class="panel"><h2>Target baca</h2><p>Pasang target kecil yang realistis. Progres dan streak bisa dilihat di <a href="#/library/stats">Pustaka → Statistik</a>.</p>
+    <div class="prow"><span class="lb">Chapter per hari<small>Dihitung saat chapter ditandai selesai</small></span><div style="display:flex;gap:10px;align-items:center">${range('goal', 1, 20, 1)}<b id="goalOut" style="min-width:30px">${S.goal}</b></div></div></section>
   <section class="panel"><h2>Data</h2><p>Cadangkan atau pindahkan pustaka dan setelan ke perangkat lain.</p>
     <div class="acts" style="margin:0"><button class="btn" data-act="export">Ekspor cadangan</button><label class="btn" style="cursor:pointer">Impor cadangan<input type="file" id="impfile" accept="application/json" hidden></label><button class="btn" data-act="clear-hist">Hapus riwayat</button><button class="btn" data-act="clear-all">Hapus semua data</button></div></section>
   <section class="panel"><h2>Pintasan keyboard</h2><p>Berlaku pas lagi baca.</p><div class="kbd"><span><kbd>N</kbd> / <kbd>P</kbd> chapter berikutnya / sebelumnya</span><span><kbd>←</kbd> <kbd>→</kbd> pindah halaman</span><span><kbd>J</kbd> / <kbd>K</kbd> gulir turun / naik</span><span><kbd>A</kbd> gulir otomatis</span><span><kbd>B</kbd> penanda</span><span><kbd>C</kbd> daftar chapter</span><span><kbd>S</kbd> setelan baca</span><span><kbd>F</kbd> layar penuh</span><span><kbd>Esc</kbd> kembali</span><span><kbd>/</kbd> fokus ke pencarian</span></div></section></div>`);
@@ -1537,6 +1649,7 @@ document.addEventListener('input', e => {
   if (t.matches('[data-range]')) {
     setPath(S, t.dataset.range, parseFloat(t.value)); saveS(); prefChanged(t.dataset.range);
     if (t.dataset.range === 'net.limit') { const o = $('#limOut'); if (o) o.textContent = t.value; updateMeter(); }
+    if (t.dataset.range === 'goal') { const o = $('#goalOut'); if (o) o.textContent = t.value; }
   }
   else if (t.id === 'chq' && D) { D.filter = t.value.trim(); D.limit = 100; renderChapters(); }
   else if (t.id === 'nchq' && N) { N.filter = t.value.trim(); renderNovelChapters(); }
@@ -1588,6 +1701,18 @@ function act(a) {
     case 'diagrun': runDiag(); break;
     case 'export': exportData(); break;
     case 'clear-hist': L.hist = {}; saveLNow(); toast('Riwayat dihapus'); break;
+    case 'reset-activity':
+      if (!a.dataset.sure) {
+        a.dataset.sure = '1';
+        a.textContent = 'Ketuk lagi buat yakin';
+        setTimeout(() => { delete a.dataset.sure; a.textContent = 'Reset statistik'; }, 3500);
+      } else {
+        L.activity = {};
+        saveLNow();
+        toast('Statistik baca direset');
+        route();
+      }
+      break;
     case 'clear-all':
       if (!a.dataset.sure) { a.dataset.sure = '1'; a.textContent = 'Ketuk lagi buat yakin'; setTimeout(() => { delete a.dataset.sure; a.textContent = 'Hapus semua data'; }, 3500); }
       else { L = clone(LDEF); S = clone(DEF); saveS(); saveLNow(); applyTheme(); viewSettings(); toast('Semua data dihapus'); }
