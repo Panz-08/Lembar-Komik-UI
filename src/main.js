@@ -90,6 +90,7 @@ const IC = {
   check: '<path d="M5 12l5 5 9-10"/>',
   refresh: '<path d="M20 11a8 8 0 10-2.3 6M20 4v7h-7"/>',
   link: '<path d="M10 14a4 4 0 005.7 0l3-3a4 4 0 00-5.7-5.7l-1 1M14 10a4 4 0 00-5.7 0l-3 3A4 4 0 0011 18.7l1-1"/>',
+  shuffle: '<path d="M16 3h5v5"/><path d="M4 20L21 3"/><path d="M21 16v5h-5"/><path d="M15 15l6 6"/><path d="M4 4l5 5"/>',
   book: '<path d="M4 5a2 2 0 012-2h13v16H6a2 2 0 00-2 2z"/><path d="M4 19V5"/>',
   sliders: '<path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12M20 18h0"/><circle cx="16" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="18" r="2"/>'
 };
@@ -345,6 +346,8 @@ const nApi = {
     get(`/novels/${enc(slug)}/chapters?page=${page}&limit=${limit}&order=${enc(order)}`, 300000)
       .then(d => ({ novel: normNovel(d.novel || {}), items: (d.items || []).map(normNovelChapter), pagination: d.pagination || {} })),
   chapter: id => get(`/novels/chapters/${enc(id)}?content=1`, 1800000).then(normNovelChapter),
+  randomChapter: slug => get(`/novels/${enc(slug)}/random-chapter`, 0)
+    .then(d => ({ novel: normNovel(d.novel || {}), chapter: normNovelChapter(d.chapter || {}) })),
   genres: ({ limit = 30 } = {}) => get(`/novels/genres?limit=${limit}`, 3600000).then(d => d.items || [])
 };
 
@@ -469,6 +472,7 @@ function renderNovelActions() {
   else if (first) main = `<a class="btn pri" href="${hrefRead(N.key, first.id)}">${ico('play', 18)} Mulai dari Chapter 1</a>`;
   const sh = L.shelf[N.key] ? L.shelf[N.key].status : '';
   el.innerHTML = `${main}
+    <button class="btn" data-act="nrandom">${ico('shuffle', 18)} Chapter acak</button>
     <button class="btn ${isFav(N.key) ? 'on' : ''}" data-act="nfav">${ico('heart', 18)} ${isFav(N.key) ? 'Favorit' : 'Tambah favorit'}</button>
     <select class="sel" data-act="shelf" data-novel="1" aria-label="Rak baca"><option value="">Rak: belum diatur</option><option value="reading" ${sh === 'reading' ? 'selected' : ''}>Lagi dibaca</option><option value="plan" ${sh === 'plan' ? 'selected' : ''}>Mau dibaca</option><option value="done" ${sh === 'done' ? 'selected' : ''}>Udah tamat</option></select>
     <button class="btn" data-act="ncopy">${ico('link', 18)} Bagikan</button>
@@ -495,9 +499,10 @@ async function loadNovelChapters(first) {
 function renderNovelChapters() {
   const box = $('#nchbox'); if (!box || !N) return;
   const readMap = L.read[N.key] || {};
+  const h = L.hist[N.key];
   let list = N.items.slice();
   if (N.filter) { const f = N.filter.toLowerCase(); list = list.filter(c => cleanChapterTitle(c.title, N.d.title).toLowerCase().includes(f)); }
-  box.innerHTML = list.length ? `<div class="chlist">${list.map(c => `<a class="chrow ${readMap[c.id] ? 'read' : ''}" href="${hrefRead(N.key, c.id)}"><span class="n">${esc(cleanChapterTitle(c.title, N.d.title))}</span>${c.date ? `<span class="dt">${esc(shortDate(c.date))}</span>` : ''}<span class="ck">${ico('check', 16)}</span></a>`).join('')}</div>${N.hasNext ? '<div style="text-align:center;margin-top:16px"><button class="btn" data-act="nchmore">Muat chapter lain</button></div>' : ''}` : '<div class="state"><p style="margin:0">Nggak ada chapter yang cocok.</p></div>';
+  box.innerHTML = list.length ? `<div class="chlist">${list.map(c => `<a class="chrow ${readMap[c.id] ? 'read' : ''} ${h && h.chapterId === c.id ? 'last' : ''}" href="${hrefRead(N.key, c.id)}"><span class="n">${esc(cleanChapterTitle(c.title, N.d.title))}</span>${c.date ? `<span class="dt">${esc(shortDate(c.date))}</span>` : ''}<span class="ck">${ico('check', 16)}</span></a>`).join('')}</div>${N.hasNext ? '<div style="text-align:center;margin-top:16px"><button class="btn" data-act="nchmore">Muat chapter lain</button></div>' : ''}` : '<div class="state"><p style="margin:0">Nggak ada chapter yang cocok.</p></div>';
 }
 
 /* ============================================================
@@ -1734,6 +1739,24 @@ function act(a) {
       break;
     }
     case 'nchmore': loadNovelChapters(false); break;
+    case 'nrandom': {
+      if (!N || a.disabled) break;
+      a.disabled = true;
+      const old = a.innerHTML;
+      a.innerHTML = ico('refresh', 18) + ' Mencari…';
+      (async () => {
+        try {
+          const r = await withDeadline(nApi.randomChapter(N.d.rawSlug), 20000);
+          if (!r.chapter || !r.chapter.id) throw new Error('Chapter acak tidak tersedia');
+          location.hash = hrefRead(N.key, r.chapter.id);
+        } catch (e) {
+          toast(e.message || 'Gagal mengambil chapter acak');
+          a.disabled = false;
+          a.innerHTML = old;
+        }
+      })();
+      break;
+    }
     case 'nfav':
       if (!N) break;
       if (isFav(N.key)) { delete L.favs[N.key]; toast('Dihapus dari favorit'); }

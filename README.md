@@ -18,6 +18,7 @@ di server. Jadi API key tidak ikut ke bundle JavaScript atau DevTools.
 
 - **Komik** - cari lintas situs, detail komik, daftar chapter, dan pembaca webtoon/manga.
 - **Novel** - rak novel populer, update chapter terbaru, pencarian, detail novel, dan daftar chapter.
+- **Chapter acak** - tombol di halaman novel untuk membuka chapter mana saja, cocok buat menjelajah judul baru.
 - **Pembaca novel** - teks chapter lengkap dengan tipografi serif/sans, ukuran huruf, tinggi
   baris, lebar kolom, latar putih/sepia/abu/gelap, dan rata teks. Nyaman buat sesi baca panjang.
 - **Pustaka** - lanjut baca, favorit, rak baca, dan penanda. Komik dan novel masuk ke pustaka yang sama.
